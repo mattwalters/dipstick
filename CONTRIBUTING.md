@@ -19,7 +19,7 @@ Before contributing code or adding new provider adapters, keep our core design p
 
 ### Prerequisites
 
-* Go 1.24+ (matching `go.mod`)
+* Go 1.23+ (matching `go.mod`)
 * `golangci-lint` (v1.64+)
 * `git` and `make`
 

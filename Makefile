@@ -33,3 +33,17 @@ clean:
 	go clean
 	rm -f dipstick
 	rm -rf dist/
+
+help:
+	@echo "Available targets:"
+	@echo "  all      - Build, test, and lint"
+	@echo "  build    - Build all packages and binaries"
+	@echo "  install  - Install dipstick binary to GOBIN"
+	@echo "  test     - Run all unit and integration tests with race detector"
+	@echo "  lint     - Run golangci-lint"
+	@echo "  fmt      - Format Go files and optimize imports"
+	@echo "  tidy     - Prune and verify go.mod / go.sum"
+	@echo "  matrix   - Synchronize support matrix in README.md"
+	@echo "  capture  - Capture local vendor test fixtures"
+	@echo "  clean    - Remove build artifacts and dist/ directory"
+	@echo "  help     - Show this help message"
