@@ -101,10 +101,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	if doctorFlag {
-		return runDoctor(fs.Args(), stdout, stderr)
-	}
-
 	remaining := fs.Args()
 	if len(remaining) > 0 {
 		switch remaining[0] {
@@ -178,6 +174,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		opts = append(opts, dipstick.WithStrict(true))
 	}
 
+	if doctorFlag {
+		return executeDoctor(opts, jsonFlag, stdout, stderr)
+	}
+
 	ctx := context.Background()
 	report, err := collectFn(ctx, opts...)
 	if err != nil {
@@ -212,6 +212,33 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	if len(report.Providers) == 0 {
 		return 1
+	}
+
+	return 0
+}
+
+func executeDoctor(opts []dipstick.Option, jsonFlag bool, stdout, stderr io.Writer) int {
+	ctx := context.Background()
+	report, err := doctorFn(ctx, opts...)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+
+	if jsonFlag {
+		enc := json.NewEncoder(stdout)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			_, _ = fmt.Fprintf(stderr, "error encoding doctor report: %v\n", err)
+			return 2
+		}
+		return 0
+	}
+
+	if err := report.RenderText(stdout); err != nil {
+		_, _ = fmt.Fprintf(stderr, "error rendering doctor report: %v\n", err)
+		return 2
 	}
 
 	return 0
@@ -324,28 +351,5 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 		opts = append(opts, dipstick.WithStrict(true))
 	}
 
-	ctx := context.Background()
-	report, err := doctorFn(ctx, opts...)
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
-	}
-
-	if jsonFlag {
-		enc := json.NewEncoder(stdout)
-		enc.SetEscapeHTML(false)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			_, _ = fmt.Fprintf(stderr, "error encoding doctor report: %v\n", err)
-			return 2
-		}
-		return 0
-	}
-
-	if err := report.RenderText(stdout); err != nil {
-		_, _ = fmt.Fprintf(stderr, "error rendering doctor report: %v\n", err)
-		return 2
-	}
-
-	return 0
+	return executeDoctor(opts, jsonFlag, stdout, stderr)
 }

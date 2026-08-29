@@ -281,6 +281,34 @@ func TestRun_Doctor_GoldenOutput(t *testing.T) {
 		}
 	})
 
+	t.Run("--doctor flag with --json", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"--doctor", "--json"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("expected exit code 0 on --doctor --json, got %d. stderr: %s", code, stderr.String())
+		}
+		if !bytes.Equal(stdout.Bytes(), goldenDoctorJSON) {
+			t.Errorf("doctor json mismatch on --doctor --json.\nGot:\n%s\nWant:\n%s", stdout.String(), string(goldenDoctorJSON))
+		}
+	})
+
+	t.Run("--doctor flag with options", func(t *testing.T) {
+		var capturedOpts []dipstick.Option
+		doctorFn = func(ctx context.Context, opts ...dipstick.Option) (*dipstick.DoctorReport, error) {
+			capturedOpts = opts
+			return goldenDoctorRep, nil
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"--doctor", "-p", "claude", "-timeout", "10s", "-source-timeout", "2s", "--policy", "local", "--strict"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("expected exit code 0, got %d. stderr: %s", code, stderr.String())
+		}
+		if len(capturedOpts) == 0 {
+			t.Fatalf("expected options captured from --doctor with flags")
+		}
+	})
+
 	fixtures := []struct {
 		name     string
 		jsonPath string

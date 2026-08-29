@@ -520,6 +520,37 @@ func TestDoctor_InvalidOptionsAndCancellation(t *testing.T) {
 		}
 	})
 
+	t.Run("mid-run cancelled context", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		source1 := &doctorFakeSource{
+			id:        dipstick.SourceOAuthAPI,
+			tier:      dipstick.TierAPI,
+			available: true,
+			fetchReport: &dipstick.ProviderReport{
+				Identity: &dipstick.Identity{Email: "test@example.com"},
+			},
+		}
+		adapter := &doctorFakeAdapter{
+			id: dipstick.ProviderClaude,
+			detection: dipstick.Detection{
+				Installed: true,
+				Version:   "2.1.246",
+			},
+			sources: []dipstick.Source{source1},
+		}
+
+		// Cancel context after first provider
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			cancel()
+		}()
+
+		_, err := dipstick.Doctor(ctx, dipstick.WithAdapter(adapter), dipstick.WithProviders(dipstick.ProviderClaude, dipstick.ProviderCodex, dipstick.ProviderOpenCode))
+		if err == nil {
+			t.Errorf("expected error on mid-run context cancellation, got nil")
+		}
+	})
+
 	t.Run("unknown provider", func(t *testing.T) {
 		_, err := dipstick.Doctor(context.Background(), dipstick.WithProviders(dipstick.ProviderID("invalid-provider")))
 		if err == nil {

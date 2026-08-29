@@ -221,6 +221,10 @@ func Doctor(ctx context.Context, opts ...Option) (*DoctorReport, error) {
 	}
 
 	for _, pID := range ordered {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		var adp Adapter
 		if custom, ok := cfg.adapters[pID]; ok {
 			adp = custom
@@ -229,6 +233,9 @@ func Doctor(ctx context.Context, opts ...Option) (*DoctorReport, error) {
 		}
 
 		pReport := diagnoseProvider(ctx, pID, adp, cfg)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		report.Providers = append(report.Providers, pReport)
 	}
 
