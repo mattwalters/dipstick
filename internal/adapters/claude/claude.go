@@ -5,16 +5,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mattwalters/dipstick"
 	"github.com/mattwalters/dipstick/internal/cliexec"
 	"github.com/mattwalters/dipstick/internal/localstate"
+	"github.com/mattwalters/dipstick/internal/types"
 )
 
-func init() {
-	dipstick.RegisterAdapter(dipstick.ProviderClaude, func() dipstick.Adapter {
-		return New()
-	})
-}
+var _ types.Adapter = (*Adapter)(nil)
 
 // Option configures a Claude Adapter.
 type Option func(*Adapter)
@@ -80,20 +76,25 @@ func New(opts ...Option) *Adapter {
 }
 
 // ID returns the provider identifier for Claude.
-func (a *Adapter) ID() dipstick.ProviderID {
-	return dipstick.ProviderClaude
+func (a *Adapter) ID() types.ProviderID {
+	return types.ProviderClaude
+}
+
+// Name returns the provider identifier string.
+func (a *Adapter) Name() string {
+	return string(types.ProviderClaude)
 }
 
 // Detect inspects local environment to determine installation, auth, and version state.
-func (a *Adapter) Detect(ctx context.Context) (dipstick.Detection, error) {
+func (a *Adapter) Detect(ctx context.Context) (types.Detection, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return dipstick.Detection{}, err
+		return types.Detection{}, err
 	}
 
-	var detection dipstick.Detection
+	var detection types.Detection
 
 	// 1. Check binary installation and probe version
 	resolvedPath, err := cliexec.ResolveBinary("claude")
@@ -131,7 +132,7 @@ func (a *Adapter) Detect(ctx context.Context) (dipstick.Detection, error) {
 }
 
 // Sources returns the ordered source ladder for Claude, highest tier first.
-func (a *Adapter) Sources() []dipstick.Source {
+func (a *Adapter) Sources() []types.Source {
 	oauthOpts := []OAuthOption{
 		WithBaseURL(a.baseURL),
 		WithHTTPClient(a.httpClient),
@@ -144,7 +145,7 @@ func (a *Adapter) Sources() []dipstick.Source {
 		}))
 	}
 
-	return []dipstick.Source{
+	return []types.Source{
 		NewOAuthAPISource(oauthOpts...),
 	}
 }

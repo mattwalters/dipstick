@@ -411,6 +411,30 @@ func TestResolver_ProviderConfigDir(t *testing.T) {
 			t.Errorf("ProviderConfigDir(%s): expected %s, got %s", tc.provider, tc.expected, dir)
 		}
 	}
+
+	t.Run("codex env overrides", func(t *testing.T) {
+		rHome := localstate.New(
+			localstate.WithHomeDir(home),
+			localstate.WithEnvMap(map[string]string{
+				"CODEX_HOME": "/custom/codex/home",
+			}),
+		)
+		dir, err := rHome.ProviderConfigDir("codex")
+		if err != nil || dir != "/custom/codex/home" {
+			t.Errorf("ProviderConfigDir(codex) with CODEX_HOME: expected /custom/codex/home, got %s (err: %v)", dir, err)
+		}
+
+		rConfig := localstate.New(
+			localstate.WithHomeDir(home),
+			localstate.WithEnvMap(map[string]string{
+				"CODEX_CONFIG_DIR": "/custom/codex/config",
+			}),
+		)
+		dir, err = rConfig.ProviderConfigDir("codex")
+		if err != nil || dir != "/custom/codex/config" {
+			t.Errorf("ProviderConfigDir(codex) with CODEX_CONFIG_DIR: expected /custom/codex/config, got %s (err: %v)", dir, err)
+		}
+	})
 }
 
 func TestResolver_ReadClaudeCredentials_Keychain(t *testing.T) {

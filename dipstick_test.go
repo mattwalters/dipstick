@@ -66,23 +66,32 @@ func TestCollect_Default(t *testing.T) {
 		t.Errorf("expected non-zero GeneratedAt")
 	}
 
-	// The adapters are stubs until the source-ladder resolver lands, so each
-	// provider is accounted for as a not_supported error rather than as a
-	// provider report: dipstick.v1 has no way to spell "collected nothing"
-	// inside a ProviderReport.
 	for _, id := range dipstick.Providers() {
-		pe, ok := findError(report, id)
-		if !ok {
-			t.Errorf("missing provider %s in report errors", id)
+		pe, inErr := findError(report, id)
+		pr, inProv := findProvider(report, id)
+		if !inErr && !inProv {
+			t.Errorf("missing provider %s in both report errors and providers", id)
 			continue
 		}
-		if pe.Reason != dipstick.ReasonNotSupported {
-			t.Errorf("provider %s: expected reason %s, got %s", id, dipstick.ReasonNotSupported, pe.Reason)
+		if id == dipstick.ProviderCodex {
+			if inProv {
+				if pr.Source != dipstick.SourceLocalState {
+					t.Errorf("codex provider: expected source %s, got %s", dipstick.SourceLocalState, pr.Source)
+				}
+			}
+		} else if id == dipstick.ProviderClaude {
+			if inProv {
+				if pr.Source != dipstick.SourceOAuthAPI {
+					t.Errorf("claude provider: expected source %s, got %s", dipstick.SourceOAuthAPI, pr.Source)
+				}
+			}
+		} else {
+			if !inErr {
+				t.Errorf("expected stub provider %s in report errors", id)
+			} else if pe.Reason != dipstick.ReasonNotSupported {
+				t.Errorf("provider %s: expected reason %s, got %s", id, dipstick.ReasonNotSupported, pe.Reason)
+			}
 		}
-	}
-
-	if len(report.Providers) != 0 {
-		t.Errorf("expected no provider reports from stub adapters, got %d", len(report.Providers))
 	}
 }
 
@@ -109,17 +118,22 @@ func TestCollect_WithProviders(t *testing.T) {
 		return
 	}
 
-	if len(report.Errors) != 2 {
-		t.Fatalf("expected 2 unique providers, got %d", len(report.Errors))
+	if len(report.Errors)+len(report.Providers) != 2 {
+		t.Fatalf("expected 2 unique providers total, got %d errors and %d providers", len(report.Errors), len(report.Providers))
 	}
 
-	if _, ok := findError(report, dipstick.ProviderClaude); !ok {
+	_, hasClaudeErr := findError(report, dipstick.ProviderClaude)
+	_, hasClaudeProv := findProvider(report, dipstick.ProviderClaude)
+	if !hasClaudeErr && !hasClaudeProv {
 		t.Errorf("expected claude provider in report")
 	}
 	if _, ok := findError(report, dipstick.ProviderAntigravity); !ok {
 		t.Errorf("expected antigravity provider in report")
 	}
 	if _, ok := findError(report, dipstick.ProviderCodex); ok {
+		t.Errorf("did not expect codex provider in report")
+	}
+	if _, ok := findProvider(report, dipstick.ProviderCodex); ok {
 		t.Errorf("did not expect codex provider in report")
 	}
 }

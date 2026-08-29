@@ -12,10 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattwalters/dipstick"
 	"github.com/mattwalters/dipstick/internal/localstate"
 	"github.com/mattwalters/dipstick/internal/scrub"
+	"github.com/mattwalters/dipstick/internal/types"
 )
+
+var _ types.Source = (*OAuthAPISource)(nil)
 
 const (
 	// DefaultOAuthUsageURL is the default Anthropic OAuth usage API endpoint.
@@ -119,13 +121,13 @@ func NewOAuthAPISource(opts ...OAuthOption) *OAuthAPISource {
 }
 
 // ID returns the source identifier for Tier 1 OAuth API.
-func (s *OAuthAPISource) ID() dipstick.SourceID {
-	return dipstick.SourceOAuthAPI
+func (s *OAuthAPISource) ID() types.SourceID {
+	return types.SourceOAuthAPI
 }
 
 // Tier returns the source robustness tier (Tier 1: API).
-func (s *OAuthAPISource) Tier() dipstick.SourceTier {
-	return dipstick.TierAPI
+func (s *OAuthAPISource) Tier() types.SourceTier {
+	return types.TierAPI
 }
 
 // Available checks whether prerequisites for this source are satisfied without making network requests.
@@ -142,7 +144,7 @@ func (s *OAuthAPISource) Available(ctx context.Context) bool {
 }
 
 // Fetch gathers usage data from the Anthropic OAuth usage API endpoint.
-func (s *OAuthAPISource) Fetch(ctx context.Context) (*dipstick.ProviderReport, error) {
+func (s *OAuthAPISource) Fetch(ctx context.Context) (*types.ProviderReport, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -151,25 +153,25 @@ func (s *OAuthAPISource) Fetch(ctx context.Context) (*dipstick.ProviderReport, e
 	}
 
 	if s.credentialResolver == nil {
-		return nil, fmt.Errorf("%w: no credential resolver configured", dipstick.ErrNotAuthenticated)
+		return nil, fmt.Errorf("%w: no credential resolver configured", types.ErrNotAuthenticated)
 	}
 
 	creds, err := s.credentialResolver(ctx)
 	if err != nil {
 		if errors.Is(err, localstate.ErrCredentialExpired) {
-			return nil, fmt.Errorf("%w: Claude credentials have expired", dipstick.ErrCredentialExpired)
+			return nil, fmt.Errorf("%w: Claude credentials have expired", types.ErrCredentialExpired)
 		}
 		if errors.Is(err, localstate.ErrCredentialNotFound) {
-			return nil, fmt.Errorf("%w: Claude OAuth credentials not found in keychain or .credentials.json", dipstick.ErrNotAuthenticated)
+			return nil, fmt.Errorf("%w: Claude OAuth credentials not found in keychain or .credentials.json", types.ErrNotAuthenticated)
 		}
 		if errors.Is(err, localstate.ErrCredentialMalformed) {
-			return nil, fmt.Errorf("%w: Claude credentials payload is malformed: %v", dipstick.ErrParseFailed, err)
+			return nil, fmt.Errorf("%w: Claude credentials payload is malformed: %v", types.ErrParseFailed, err)
 		}
-		return nil, fmt.Errorf("%w: failed to resolve Claude credentials: %v", dipstick.ErrNotAuthenticated, err)
+		return nil, fmt.Errorf("%w: failed to resolve Claude credentials: %v", types.ErrNotAuthenticated, err)
 	}
 
 	if creds == nil || creds.AccessToken == "" {
-		return nil, fmt.Errorf("%w: Claude OAuth access token is missing", dipstick.ErrNotAuthenticated)
+		return nil, fmt.Errorf("%w: Claude OAuth access token is missing", types.ErrNotAuthenticated)
 	}
 
 	now := time.Now()
@@ -177,7 +179,7 @@ func (s *OAuthAPISource) Fetch(ctx context.Context) (*dipstick.ProviderReport, e
 		now = s.now()
 	}
 	if creds.IsExpired(now) {
-		return nil, fmt.Errorf("%w: Claude credentials expired at %v", dipstick.ErrCredentialExpired, creds.ExpiresAt)
+		return nil, fmt.Errorf("%w: Claude credentials expired at %v", types.ErrCredentialExpired, creds.ExpiresAt)
 	}
 
 	endpoint := fmt.Sprintf("%s/api/oauth/usage", strings.TrimRight(s.baseURL, "/"))
@@ -192,7 +194,7 @@ func (s *OAuthAPISource) Fetch(ctx context.Context) (*dipstick.ProviderReport, e
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: creating usage request: %v", dipstick.ErrUpstreamError, err)
+		return nil, fmt.Errorf("%w: creating usage request: %v", types.ErrUpstreamError, err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
@@ -212,7 +214,7 @@ func (s *OAuthAPISource) Fetch(ctx context.Context) (*dipstick.ProviderReport, e
 		}
 		if reqCtx.Err() != nil {
 			if errors.Is(reqCtx.Err(), context.DeadlineExceeded) {
-				return nil, fmt.Errorf("%w: request timed out: %v", dipstick.ErrTimeout, reqCtx.Err())
+				return nil, fmt.Errorf("%w: request timed out: %v", types.ErrTimeout, reqCtx.Err())
 			}
 			if errors.Is(reqCtx.Err(), context.Canceled) {
 				return nil, reqCtx.Err()
@@ -220,11 +222,13 @@ func (s *OAuthAPISource) Fetch(ctx context.Context) (*dipstick.ProviderReport, e
 		}
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			return nil, fmt.Errorf("%w: request timed out: %v", dipstick.ErrTimeout, err)
+			return nil, fmt.Errorf("%w: request timed out: %v", types.ErrTimeout, err)
 		}
-		return nil, fmt.Errorf("%w: upstream HTTP request failed: %s", dipstick.ErrUpstreamError, scrub.Scrub(err.Error()))
+		return nil, fmt.Errorf("%w: upstream HTTP request failed: %s", types.ErrUpstreamError, scrub.Scrub(err.Error()))
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB limit
 	if err != nil {
@@ -233,7 +237,7 @@ func (s *OAuthAPISource) Fetch(ctx context.Context) (*dipstick.ProviderReport, e
 		}
 		if reqCtx.Err() != nil {
 			if errors.Is(reqCtx.Err(), context.DeadlineExceeded) {
-				return nil, fmt.Errorf("%w: reading response body timed out: %v", dipstick.ErrTimeout, reqCtx.Err())
+				return nil, fmt.Errorf("%w: reading response body timed out: %v", types.ErrTimeout, reqCtx.Err())
 			}
 			if errors.Is(reqCtx.Err(), context.Canceled) {
 				return nil, reqCtx.Err()
@@ -241,25 +245,25 @@ func (s *OAuthAPISource) Fetch(ctx context.Context) (*dipstick.ProviderReport, e
 		}
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			return nil, fmt.Errorf("%w: reading response body timed out: %v", dipstick.ErrTimeout, err)
+			return nil, fmt.Errorf("%w: reading response body timed out: %v", types.ErrTimeout, err)
 		}
-		return nil, fmt.Errorf("%w: reading response body: %v", dipstick.ErrUpstreamError, scrub.Scrub(err.Error()))
+		return nil, fmt.Errorf("%w: reading response body: %v", types.ErrUpstreamError, scrub.Scrub(err.Error()))
 	}
 
 	switch resp.StatusCode {
 	case http.StatusOK:
 		// Process 200 OK below
 	case http.StatusUnauthorized:
-		return nil, fmt.Errorf("%w: authentication failed (HTTP 401); re-login with 'claude'", dipstick.ErrNotAuthenticated)
+		return nil, fmt.Errorf("%w: authentication failed (HTTP 401); re-login with 'claude'", types.ErrNotAuthenticated)
 	case http.StatusForbidden:
-		return nil, fmt.Errorf("%w: access forbidden by upstream (HTTP 403)", dipstick.ErrUpstreamError)
+		return nil, fmt.Errorf("%w: access forbidden by upstream (HTTP 403)", types.ErrUpstreamError)
 	case http.StatusTooManyRequests:
-		return nil, fmt.Errorf("%w: rate limit exceeded on upstream usage API (HTTP 429)", dipstick.ErrUpstreamError)
+		return nil, fmt.Errorf("%w: rate limit exceeded on upstream usage API (HTTP 429)", types.ErrUpstreamError)
 	default:
 		if resp.StatusCode >= 500 {
-			return nil, fmt.Errorf("%w: upstream server error (HTTP %d)", dipstick.ErrUpstreamError, resp.StatusCode)
+			return nil, fmt.Errorf("%w: upstream server error (HTTP %d)", types.ErrUpstreamError, resp.StatusCode)
 		}
-		return nil, fmt.Errorf("%w: unexpected HTTP status %d: %s", dipstick.ErrUpstreamError, resp.StatusCode, scrub.Scrub(string(bodyBytes)))
+		return nil, fmt.Errorf("%w: unexpected HTTP status %d: %s", types.ErrUpstreamError, resp.StatusCode, scrub.Scrub(string(bodyBytes)))
 	}
 
 	windows, err := parseOAuthUsageResponse(bodyBytes)
@@ -267,9 +271,9 @@ func (s *OAuthAPISource) Fetch(ctx context.Context) (*dipstick.ProviderReport, e
 		return nil, err
 	}
 
-	var identity *dipstick.Identity
+	var identity *types.Identity
 	if creds.Email != "" || creds.AccountID != "" || creds.Subscription != "" {
-		identity = &dipstick.Identity{
+		identity = &types.Identity{
 			Email:     creds.Email,
 			AccountID: creds.AccountID,
 			Plan:      creds.Subscription,
@@ -283,10 +287,10 @@ func (s *OAuthAPISource) Fetch(ctx context.Context) (*dipstick.ProviderReport, e
 		}
 	}
 
-	return &dipstick.ProviderReport{
-		Provider:   dipstick.ProviderClaude,
-		Source:     dipstick.SourceOAuthAPI,
-		Confidence: dipstick.ConfidenceExact,
+	return &types.ProviderReport{
+		Provider:   types.ProviderClaude,
+		Source:     types.SourceOAuthAPI,
+		Confidence: types.ConfidenceExact,
 		CLIVersion: cliVersion,
 		Identity:   identity,
 		Windows:    windows,
@@ -303,15 +307,15 @@ type windowRawData struct {
 
 // parseOAuthUsageResponse parses the JSON body returned by Anthropic's OAuth usage endpoint.
 // It dynamically extracts rate windows while mapping five_hour -> session and seven_day -> weekly.
-func parseOAuthUsageResponse(data []byte) ([]dipstick.RateWindow, error) {
+func parseOAuthUsageResponse(data []byte) ([]types.RateWindow, error) {
 	trimmed := strings.TrimSpace(string(data))
 	if trimmed == "" {
-		return nil, fmt.Errorf("%w: empty response payload", dipstick.ErrParseFailed)
+		return nil, fmt.Errorf("%w: empty response payload", types.ErrParseFailed)
 	}
 
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(data, &root); err != nil {
-		return nil, fmt.Errorf("%w: invalid JSON response: %v", dipstick.ErrParseFailed, err)
+		return nil, fmt.Errorf("%w: invalid JSON response: %v", types.ErrParseFailed, err)
 	}
 
 	// Check if windows are under a nested "limits" or "windows" or "rate_limits" container
@@ -325,7 +329,7 @@ func parseOAuthUsageResponse(data []byte) ([]dipstick.RateWindow, error) {
 		}
 	}
 
-	discoveredWindows := make(map[string]dipstick.RateWindow)
+	discoveredWindows := make(map[string]types.RateWindow)
 
 	for _, m := range candidateMaps {
 		for key, rawVal := range m {
@@ -353,13 +357,13 @@ func parseOAuthUsageResponse(data []byte) ([]dipstick.RateWindow, error) {
 					t, err = time.Parse(time.RFC3339, resetsAtStr)
 				}
 				if err != nil {
-					return nil, fmt.Errorf("%w: malformed resets_at timestamp %q in window %q", dipstick.ErrParseFailed, resetsAtStr, key)
+					return nil, fmt.Errorf("%w: malformed resets_at timestamp %q in window %q", types.ErrParseFailed, resetsAtStr, key)
 				}
 				utc := t.UTC()
 				parsedReset = &utc
 			}
 
-			discoveredWindows[label] = dipstick.RateWindow{
+			discoveredWindows[label] = types.RateWindow{
 				Label:                 label,
 				UsedPercent:           w.Utilization,
 				Limit:                 w.Limit,
@@ -371,7 +375,7 @@ func parseOAuthUsageResponse(data []byte) ([]dipstick.RateWindow, error) {
 	}
 
 	if len(discoveredWindows) == 0 {
-		return nil, fmt.Errorf("%w: response does not contain any recognized rate windows", dipstick.ErrParseFailed)
+		return nil, fmt.Errorf("%w: response does not contain any recognized rate windows", types.ErrParseFailed)
 	}
 
 	// Sort windows deterministically: session first, weekly second, followed by others sorted by label
@@ -402,7 +406,7 @@ func parseOAuthUsageResponse(data []byte) ([]dipstick.RateWindow, error) {
 		return labels[i] < labels[j]
 	})
 
-	windows := make([]dipstick.RateWindow, 0, len(labels))
+	windows := make([]types.RateWindow, 0, len(labels))
 	for _, lbl := range labels {
 		windows = append(windows, discoveredWindows[lbl])
 	}
@@ -416,15 +420,15 @@ func normalizeWindowMetadata(key string) (string, *int64) {
 
 	switch normKey {
 	case "five_hour", "five_hours", "5h", "fivehour", "session":
-		return "session", dipstick.Ptr(FiveHourDurationSeconds)
+		return "session", types.Ptr(FiveHourDurationSeconds)
 	case "seven_day", "seven_days", "7d", "sevenday", "weekly":
-		return "weekly", dipstick.Ptr(SevenDayDurationSeconds)
+		return "weekly", types.Ptr(SevenDayDurationSeconds)
 	case "one_hour", "1h", "hourly":
-		return "hourly", dipstick.Ptr(int64(3600))
+		return "hourly", types.Ptr(int64(3600))
 	case "twenty_four_hour", "24h", "one_day", "1d", "daily":
-		return "daily", dipstick.Ptr(int64(86400))
+		return "daily", types.Ptr(int64(86400))
 	case "thirty_day", "30d", "monthly":
-		return "monthly", dipstick.Ptr(int64(30 * 86400))
+		return "monthly", types.Ptr(int64(30 * 86400))
 	default:
 		return normKey, nil
 	}

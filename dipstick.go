@@ -4,8 +4,12 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"sync"
 	"time"
+
+	"github.com/mattwalters/dipstick/internal/adapters/antigravity"
+	"github.com/mattwalters/dipstick/internal/adapters/claude"
+	"github.com/mattwalters/dipstick/internal/adapters/codex"
+	"github.com/mattwalters/dipstick/internal/adapters/opencode"
 )
 
 // DefaultTimeout is the default execution timeout for a collection run.
@@ -106,29 +110,21 @@ func (d *defaultAdapter) Detect(ctx context.Context) (Detection, error) {
 
 func (d *defaultAdapter) Sources() []Source { return nil }
 
-var (
-	defaultRegistryMu      sync.RWMutex
-	defaultAdapterRegistry = map[ProviderID]func() Adapter{
-		ProviderAntigravity: func() Adapter {
-			return &defaultAdapter{id: ProviderAntigravity}
-		},
-		ProviderClaude: func() Adapter {
-			return &defaultAdapter{id: ProviderClaude}
-		},
-		ProviderCodex: func() Adapter {
-			return &defaultAdapter{id: ProviderCodex}
-		},
-		ProviderOpenCode: func() Adapter {
-			return &defaultAdapter{id: ProviderOpenCode}
-		},
-	}
-)
-
-// RegisterAdapter registers or overrides a default adapter factory for a provider.
-func RegisterAdapter(id ProviderID, factory func() Adapter) {
-	defaultRegistryMu.Lock()
-	defer defaultRegistryMu.Unlock()
-	defaultAdapterRegistry[id] = factory
+var defaultAdapterRegistry = map[ProviderID]func() Adapter{
+	ProviderAntigravity: func() Adapter {
+		_ = antigravity.New()
+		return &defaultAdapter{id: ProviderAntigravity}
+	},
+	ProviderClaude: func() Adapter {
+		return claude.New()
+	},
+	ProviderCodex: func() Adapter {
+		return codex.New()
+	},
+	ProviderOpenCode: func() Adapter {
+		_ = opencode.New()
+		return &defaultAdapter{id: ProviderOpenCode}
+	},
 }
 
 // Collect gathers usage reports from configured providers by walking each
@@ -188,27 +184,25 @@ func Collect(ctx context.Context, opts ...Option) (*Report, error) {
 	seen := make(map[ProviderID]bool)
 	var ordered []ProviderID
 	for _, p := range targetProviders {
+		if _, ok := cfg.adapters[p]; !ok {
+			if _, ok := defaultAdapterRegistry[p]; !ok {
+				return nil, fmt.Errorf("unknown provider: %q", p)
+			}
+		}
 		if !seen[p] {
 			seen[p] = true
 			ordered = append(ordered, p)
 		}
 	}
 
-	defaultRegistryMu.RLock()
 	activeAdapters := make(map[ProviderID]Adapter, len(ordered))
 	for _, p := range ordered {
 		if custom, ok := cfg.adapters[p]; ok {
 			activeAdapters[p] = custom
 		} else {
-			factory, ok := defaultAdapterRegistry[p]
-			if !ok {
-				defaultRegistryMu.RUnlock()
-				return nil, fmt.Errorf("unknown provider: %q", p)
-			}
-			activeAdapters[p] = factory()
+			activeAdapters[p] = defaultAdapterRegistry[p]()
 		}
 	}
-	defaultRegistryMu.RUnlock()
 
 	resolver := NewResolver(activeAdapters, ResolverConfig{
 		SourcePolicy:  cfg.sourcePolicy,

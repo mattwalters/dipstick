@@ -1,0 +1,6 @@
+{
+  "auth_mode": "api_key",
+  "OPENAI_API_KEY": "sk-proj-redacted-test-api-key-1234567890",
+  "tokens": null,
+  "last_refresh": null
+}
