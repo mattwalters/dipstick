@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -106,7 +107,6 @@ func NewOAuthAPISource(opts ...OAuthOption) *OAuthAPISource {
 		timeout:            DefaultHTTPTimeout,
 		now:                time.Now,
 		httpClient: &http.Client{
-			Timeout:   DefaultHTTPTimeout,
 			Transport: http.DefaultTransport,
 		},
 	}
@@ -128,20 +128,17 @@ func (s *OAuthAPISource) Tier() dipstick.SourceTier {
 	return dipstick.TierAPI
 }
 
-// Available checks whether valid, unexpired credentials exist without making network requests.
+// Available checks whether prerequisites for this source are satisfied without making network requests.
 func (s *OAuthAPISource) Available(ctx context.Context) bool {
 	if s.credentialResolver == nil {
 		return false
 	}
 	creds, err := s.credentialResolver(ctx)
-	if err != nil || creds == nil || creds.AccessToken == "" {
-		return false
+	if err != nil {
+		// If credentials exist but are expired, the source is available to run and report ReasonCredentialExpired.
+		return errors.Is(err, localstate.ErrCredentialExpired)
 	}
-	now := time.Now()
-	if s.now != nil {
-		now = s.now()
-	}
-	return !creds.IsExpired(now)
+	return creds != nil && creds.AccessToken != ""
 }
 
 // Fetch gathers usage data from the Anthropic OAuth usage API endpoint.
@@ -210,10 +207,20 @@ func (s *OAuthAPISource) Fetch(ctx context.Context) (*dipstick.ProviderReport, e
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if reqCtx.Err() != nil {
-			if errors.Is(reqCtx.Err(), context.DeadlineExceeded) || errors.Is(reqCtx.Err(), context.Canceled) {
+			if errors.Is(reqCtx.Err(), context.DeadlineExceeded) {
 				return nil, fmt.Errorf("%w: request timed out: %v", dipstick.ErrTimeout, reqCtx.Err())
 			}
+			if errors.Is(reqCtx.Err(), context.Canceled) {
+				return nil, reqCtx.Err()
+			}
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return nil, fmt.Errorf("%w: request timed out: %v", dipstick.ErrTimeout, err)
 		}
 		return nil, fmt.Errorf("%w: upstream HTTP request failed: %s", dipstick.ErrUpstreamError, scrub.Scrub(err.Error()))
 	}

@@ -21,10 +21,6 @@ func TestAdapter_Interface(t *testing.T) {
 		t.Errorf("expected ID %q, got %q", dipstick.ProviderClaude, a.ID())
 	}
 
-	if a.Name() != "claude" {
-		t.Errorf("expected Name %q, got %q", "claude", a.Name())
-	}
-
 	sources := a.Sources()
 	if len(sources) == 0 {
 		t.Fatalf("expected non-empty source ladder")

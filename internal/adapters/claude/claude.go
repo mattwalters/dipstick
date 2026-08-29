@@ -84,11 +84,6 @@ func (a *Adapter) ID() dipstick.ProviderID {
 	return dipstick.ProviderClaude
 }
 
-// Name returns the provider identifier string (for backward compatibility).
-func (a *Adapter) Name() string {
-	return string(dipstick.ProviderClaude)
-}
-
 // Detect inspects local environment to determine installation, auth, and version state.
 func (a *Adapter) Detect(ctx context.Context) (dipstick.Detection, error) {
 	if ctx == nil {

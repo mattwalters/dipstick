@@ -38,7 +38,7 @@ func TestOAuthAPISource_Available(t *testing.T) {
 		}
 	})
 
-	t.Run("returns false when credentials expired", func(t *testing.T) {
+	t.Run("returns true when credentials expired to allow reporting credential_expired in Fetch", func(t *testing.T) {
 		src := claude.NewOAuthAPISource(
 			claude.WithNow(func() time.Time { return now }),
 			claude.WithCredentialResolver(func(ctx context.Context) (*localstate.ClaudeCredentials, error) {
@@ -49,8 +49,8 @@ func TestOAuthAPISource_Available(t *testing.T) {
 			}),
 		)
 
-		if src.Available(ctx) {
-			t.Errorf("expected Available() = false for expired credentials")
+		if !src.Available(ctx) {
+			t.Errorf("expected Available() = true for expired credentials")
 		}
 	})
 
@@ -697,6 +697,46 @@ func TestClaudeAdapter_EndToEnd_ResolverIntegration(t *testing.T) {
 	}
 	if pReport.Windows[1].Label != "weekly" || *pReport.Windows[1].UsedPercent != 50.0 {
 		t.Errorf("weekly window: got %+v", pReport.Windows[1])
+	}
+}
+
+func TestClaudeAdapter_EndToEnd_ExpiredCredentials(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-1 * time.Hour)
+
+	adapter := claude.New(
+		claude.WithAdapterNow(func() time.Time { return now }),
+		claude.WithAdapterCredentialResolver(func(ctx context.Context) (*localstate.ClaudeCredentials, error) {
+			return &localstate.ClaudeCredentials{
+				AccessToken: "sk-ant-expired-token",
+				ExpiresAt:   &past,
+			}, localstate.ErrCredentialExpired
+		}),
+	)
+
+	report, err := dipstick.Collect(ctx,
+		dipstick.WithProviders(dipstick.ProviderClaude),
+		dipstick.WithAdapter(adapter),
+	)
+	if err != nil {
+		t.Fatalf("Collect failed: %v", err)
+	}
+
+	if len(report.Providers) != 0 {
+		t.Fatalf("expected 0 providers in report, got %d", len(report.Providers))
+	}
+
+	if len(report.Errors) != 1 {
+		t.Fatalf("expected 1 error, got %d: %+v", len(report.Errors), report.Errors)
+	}
+
+	pe := report.Errors[0]
+	if pe.Provider != dipstick.ProviderClaude {
+		t.Errorf("Provider: got %q, want %q", pe.Provider, dipstick.ProviderClaude)
+	}
+	if pe.Reason != dipstick.ReasonCredentialExpired {
+		t.Errorf("Reason: got %q, want %q", pe.Reason, dipstick.ReasonCredentialExpired)
 	}
 }
 
