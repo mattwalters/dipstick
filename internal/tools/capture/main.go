@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattwalters/dipstick/internal/adapters/claude"
 	"github.com/mattwalters/dipstick/internal/cliexec"
 	"github.com/mattwalters/dipstick/internal/localstate"
 	"github.com/mattwalters/dipstick/internal/scrub"
@@ -140,9 +141,12 @@ func captureClaude(ctx context.Context, outDir string, dryRun bool, verbose bool
 	}
 
 	// Sanitize and format JSON
+	scrubbedBody := scrub.Scrub(string(bodyBytes))
 	var rawJSON any
-	if err := json.Unmarshal(bodyBytes, &rawJSON); err != nil {
-		return false, fmt.Errorf("parsing response JSON: %w", err)
+	if err := json.Unmarshal([]byte(scrubbedBody), &rawJSON); err != nil {
+		if err := json.Unmarshal(bodyBytes, &rawJSON); err != nil {
+			return false, fmt.Errorf("parsing response JSON: %w", err)
+		}
 	}
 
 	formattedJSON, err := json.MarshalIndent(rawJSON, "", "  ")
@@ -160,6 +164,11 @@ func captureClaude(ctx context.Context, outDir string, dryRun bool, verbose bool
 	findings := scrub.FindSecrets(string(formattedJSON))
 	if len(findings) > 0 {
 		return false, fmt.Errorf("sanitization failed: payload contains unredacted secrets")
+	}
+
+	windows, err := claude.ParseOAuthUsageResponse(bodyBytes)
+	if err != nil {
+		return false, fmt.Errorf("parsing rate windows: %w", err)
 	}
 
 	verDir := filepath.Join(outDir, "claude", "v"+version)
@@ -188,6 +197,7 @@ func captureClaude(ctx context.Context, outDir string, dryRun bool, verbose bool
 			AccountID: "acc-claude-test",
 			Plan:      "pro",
 		},
+		Windows:    windows,
 		ObservedAt: now,
 	}
 	goldenBytes, _ := json.MarshalIndent(goldenReport, "", "  ")

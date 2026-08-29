@@ -118,6 +118,36 @@ func TestSecretScanner_CatchesInjectedSecrets(t *testing.T) {
 			input:    "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
 			expected: "private_key",
 		},
+		{
+			name:     "Live JWT token with real signature",
+			input:    `{"id_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.live_real_cryptographic_signature_value_12345"}`,
+			expected: "unredacted_jwt",
+		},
+		{
+			name:     "Standalone Bearer token",
+			input:    `Bearer ya29.a0AfH6SMCx1234567890abcdefghijklmnopqrstuvwxyz`,
+			expected: "unredacted_bearer_token",
+		},
+		{
+			name:     "Standalone Basic auth credentials",
+			input:    `Basic dXNlcm5hbWU6c3VwZXJfc2VjcmV0X3Bhc3N3b3JkXzEyMzQ1`,
+			expected: "unredacted_basic_auth",
+		},
+		{
+			name:     "Cookie header with live session",
+			input:    `Cookie: session_id=live_secret_session_token_12345; user=admin`,
+			expected: "unredacted_cookie_header",
+		},
+		{
+			name:     "Quoted credential param",
+			input:    `{"client_secret": "super_secret_client_key_12345"}`,
+			expected: "unredacted_credential_param",
+		},
+		{
+			name:     "Unquoted credential param",
+			input:    `--password=super_secret_cli_password_12345`,
+			expected: "unredacted_credential_param",
+		},
 	}
 
 	for _, tc := range cases {

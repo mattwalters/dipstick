@@ -57,10 +57,13 @@ func FuzzOpenCodeParser(f *testing.F) {
 	}
 
 	f.Add([]byte(`{"status": "ok"}`))
+	f.Add([]byte(`{"tokens": {"input": 100, "output": 50}}`))
 	f.Add([]byte(``))
 
 	adapter := New()
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_ = adapter.Name()
+		var v any
+		_ = json.Unmarshal(data, &v)
 	})
 }

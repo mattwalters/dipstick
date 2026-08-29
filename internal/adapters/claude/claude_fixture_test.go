@@ -151,8 +151,38 @@ func TestClaudeFixtures_ReplayGoldenContracts(t *testing.T) {
 			if rep.CLIVersion != manifest.VendorVersion {
 				t.Errorf("CLIVersion: got %s, want %s", rep.CLIVersion, manifest.VendorVersion)
 			}
+			if expectedReport.Identity != nil {
+				if rep.Identity == nil {
+					t.Fatalf("expected non-nil Identity")
+				}
+				if rep.Identity.Email != expectedReport.Identity.Email {
+					t.Errorf("Identity.Email: got %s, want %s", rep.Identity.Email, expectedReport.Identity.Email)
+				}
+				if rep.Identity.AccountID != expectedReport.Identity.AccountID {
+					t.Errorf("Identity.AccountID: got %s, want %s", rep.Identity.AccountID, expectedReport.Identity.AccountID)
+				}
+				if rep.Identity.Plan != expectedReport.Identity.Plan {
+					t.Errorf("Identity.Plan: got %s, want %s", rep.Identity.Plan, expectedReport.Identity.Plan)
+				}
+			}
 			if len(rep.Windows) != len(expectedReport.Windows) {
-				t.Errorf("Windows length: got %d, want %d", len(rep.Windows), len(expectedReport.Windows))
+				t.Fatalf("Windows length: got %d, want %d", len(rep.Windows), len(expectedReport.Windows))
+			}
+			for i, expWin := range expectedReport.Windows {
+				gotWin := rep.Windows[i]
+				if gotWin.Label != expWin.Label {
+					t.Errorf("rep window[%d] label mismatch: expected %s, got %s", i, expWin.Label, gotWin.Label)
+				}
+				if expWin.UsedPercent != nil {
+					if gotWin.UsedPercent == nil || *gotWin.UsedPercent != *expWin.UsedPercent {
+						t.Errorf("rep window[%d] UsedPercent mismatch: expected %v, got %v", i, expWin.UsedPercent, gotWin.UsedPercent)
+					}
+				}
+				if expWin.WindowDurationSeconds != nil {
+					if gotWin.WindowDurationSeconds == nil || *gotWin.WindowDurationSeconds != *expWin.WindowDurationSeconds {
+						t.Errorf("rep window[%d] duration mismatch: expected %v, got %v", i, expWin.WindowDurationSeconds, gotWin.WindowDurationSeconds)
+					}
+				}
 			}
 		})
 		replayedCount++

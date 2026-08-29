@@ -98,33 +98,28 @@ func TestFixtures_GoldenReportsSchemaConformance(t *testing.T) {
 			return nil
 		}
 
-		var provReport dipstick.ProviderReport
-		if err := json.Unmarshal(data, &provReport); err != nil {
+		var rawProv any
+		if err := json.Unmarshal(data, &rawProv); err != nil {
 			t.Errorf("failed unmarshaling golden report %s: %v", path, err)
 			return nil
 		}
 
-		// Wrap in complete top-level Report for full schema validation
-		topReport := dipstick.Report{
-			SchemaVersion: dipstick.SchemaVersion,
-			GeneratedAt:   provReport.ObservedAt,
-			Providers:     []dipstick.ProviderReport{provReport},
-		}
-
-		reportBytes, err := json.Marshal(topReport)
-		if err != nil {
-			t.Errorf("failed marshaling wrapper report for %s: %v", path, err)
+		// Also unmarshal into typed ProviderReport to ensure Go struct decodability
+		var provReport dipstick.ProviderReport
+		if err := json.Unmarshal(data, &provReport); err != nil {
+			t.Errorf("failed decoding typed provider report %s: %v", path, err)
 			return nil
 		}
 
-		var unmarshaled any
-		if err := json.Unmarshal(reportBytes, &unmarshaled); err != nil {
-			t.Errorf("failed unmarshaling for schema validation for %s: %v", path, err)
-			return nil
+		// Wrap raw payload into complete top-level Report map for strict schema validation
+		rawTopReport := map[string]any{
+			"schema_version": dipstick.SchemaVersion,
+			"generated_at":   time.Now().UTC().Format(time.RFC3339),
+			"providers":      []any{rawProv},
 		}
 
-		if err := schema.Validate(unmarshaled); err != nil {
-			t.Errorf("golden report %s failed dipstick.v1 schema validation: %v\nJSON:\n%s", path, err, string(reportBytes))
+		if err := schema.Validate(rawTopReport); err != nil {
+			t.Errorf("golden report %s failed dipstick.v1 schema validation: %v\nJSON:\n%s", path, err, string(data))
 		}
 		return nil
 	})

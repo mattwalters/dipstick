@@ -1,6 +1,7 @@
 package scrub
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -34,11 +35,11 @@ var (
 
 	// paramCredsQuoted matches quoted key-value pairs in JSON, YAML, configs, CLI flags:
 	// "token": "secret", 'password': 'secret', --token="secret"
-	paramCredsQuoted = regexp.MustCompile(`(?i)(^|[\s?&,;])(--)?(["']?)(password|access_token|refresh_token|auth_token|api_key|apikey|client_secret|client_key|secret_key|private_key|token|secret|key)(["']?)(\s*[:=]\s*)(["'])([^"'\r\n]+)(["'])`)
+	paramCredsQuoted = regexp.MustCompile(`(?i)(^|[\s?&,;{])(--)?(["']?)(password|access_token|refresh_token|auth_token|api_key|apikey|client_secret|client_key|secret_key|private_key|token|secret|key)(["']?)(\s*[:=]\s*)(["'])([^"'\r\n]+)(["'])`)
 
 	// paramCredsUnquoted matches unquoted key-value pairs in URL query strings, CLI flags, plain text:
 	// token=secret, password=secret, key=secret
-	paramCredsUnquoted = regexp.MustCompile(`(?i)(^|[\s?&,;])(--)?(["']?)(password|access_token|refresh_token|auth_token|api_key|apikey|client_secret|client_key|secret_key|private_key|token|secret|key)(["']?)(\s*[:=]\s*)([^\s,"';&]+)`)
+	paramCredsUnquoted = regexp.MustCompile(`(?i)(^|[\s?&,;{])(--)?(["']?)(password|access_token|refresh_token|auth_token|api_key|apikey|client_secret|client_key|secret_key|private_key|token|secret|key)(["']?)(\s*[:=]\s*)([^\s,"';&}]+)`)
 )
 
 // Redacted is the replacement string used for scrubbed sensitive data.
@@ -128,14 +129,21 @@ var allowedEmailDomains = map[string]bool{
 
 // isSyntheticOrRedacted checks if a matched string is a known synthetic placeholder or redacted marker.
 func isSyntheticOrRedacted(s string) bool {
-	lower := strings.ToLower(s)
-	if strings.Contains(lower, "[redacted]") || strings.Contains(lower, "redacted") {
+	trimmed := strings.TrimSpace(s)
+	lower := strings.ToLower(trimmed)
+	if lower == "[redacted]" || strings.Contains(lower, "[redacted]") {
 		return true
 	}
-	if strings.Contains(lower, "mock") || strings.Contains(lower, "placeholder") || strings.Contains(lower, "dummy") {
+	if strings.HasPrefix(lower, "mock-") || strings.HasPrefix(lower, "placeholder-") {
 		return true
 	}
-	if strings.Contains(lower, "sk-ant-test") || strings.Contains(lower, "sk-test") {
+	if strings.HasPrefix(lower, "sk-ant-test") || strings.HasPrefix(lower, "sk-test") || strings.HasPrefix(lower, "sk-mock") {
+		return true
+	}
+	if strings.HasPrefix(lower, "acc-") || strings.HasPrefix(lower, "user-") {
+		return true
+	}
+	if lower == "dummy_jwt_signature" || lower == "dummy_signature" || lower == "signature-bytes" {
 		return true
 	}
 	return false
@@ -246,13 +254,89 @@ func FindSecrets(content string) []SecretFinding {
 		}
 	}
 
-	// 10. Check for real email addresses (must use synthetic domains like example.com)
+	// 10. Check for unredacted JWT tokens (must have synthetic signature)
+	for _, match := range jwtRegex.FindAllString(content, -1) {
+		parts := strings.Split(match, ".")
+		if len(parts) == 3 {
+			sig := parts[2]
+			if !isSyntheticOrRedacted(sig) && !isSyntheticOrRedacted(match) {
+				findings = append(findings, SecretFinding{
+					Rule:    "unredacted_jwt",
+					Match:   match,
+					Message: "detected unredacted JSON Web Token with live signature",
+				})
+			}
+		}
+	}
+
+	// 11. Check for standalone Bearer and Basic credentials
+	for _, match := range bearerTokenRegex.FindAllString(content, -1) {
+		if !isSyntheticOrRedacted(match) {
+			findings = append(findings, SecretFinding{
+				Rule:    "unredacted_bearer_token",
+				Match:   match,
+				Message: "detected standalone unredacted Bearer token",
+			})
+		}
+	}
+	for _, match := range basicAuthRegex.FindAllString(content, -1) {
+		if !isSyntheticOrRedacted(match) {
+			findings = append(findings, SecretFinding{
+				Rule:    "unredacted_basic_auth",
+				Match:   match,
+				Message: "detected standalone unredacted Basic auth credentials",
+			})
+		}
+	}
+
+	// 12. Check for unredacted Cookie headers
+	for _, match := range cookieHeaderRegex.FindAllString(content, -1) {
+		if !isSyntheticOrRedacted(match) {
+			findings = append(findings, SecretFinding{
+				Rule:    "unredacted_cookie_header",
+				Match:   match,
+				Message: "detected unredacted Cookie or Set-Cookie header",
+			})
+		}
+	}
+
+	// 13. Check for unredacted key-value credentials (quoted)
+	quotedMatches := paramCredsQuoted.FindAllStringSubmatch(content, -1)
+	for _, sub := range quotedMatches {
+		if len(sub) >= 10 {
+			val := sub[8]
+			if !isSyntheticOrRedacted(val) {
+				findings = append(findings, SecretFinding{
+					Rule:    "unredacted_credential_param",
+					Match:   sub[0],
+					Message: fmt.Sprintf("detected unredacted credential parameter %q", sub[4]),
+				})
+			}
+		}
+	}
+
+	// 14. Check for unredacted key-value credentials (unquoted)
+	unquotedMatches := paramCredsUnquoted.FindAllStringSubmatch(content, -1)
+	for _, sub := range unquotedMatches {
+		if len(sub) >= 8 {
+			val := sub[7]
+			if !isSyntheticOrRedacted(val) {
+				findings = append(findings, SecretFinding{
+					Rule:    "unredacted_credential_param",
+					Match:   sub[0],
+					Message: fmt.Sprintf("detected unredacted credential parameter %q", sub[4]),
+				})
+			}
+		}
+	}
+
+	// 15. Check for real email addresses (must use synthetic domains like example.com)
 	emailMatches := emailRegex.FindAllStringSubmatch(content, -1)
 	for _, sub := range emailMatches {
 		if len(sub) >= 2 {
 			fullEmail := sub[0]
 			domain := strings.ToLower(sub[1])
-			if !allowedEmailDomains[domain] && !isSyntheticOrRedacted(fullEmail) {
+			if !allowedEmailDomains[domain] {
 				findings = append(findings, SecretFinding{
 					Rule:    "real_email_address",
 					Match:   fullEmail,
