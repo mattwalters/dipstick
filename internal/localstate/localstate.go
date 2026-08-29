@@ -61,31 +61,41 @@ func CacheDir() (string, error) {
 
 // ProviderConfigDir returns the default configuration directory for a specific provider.
 func ProviderConfigDir(provider string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving user home directory: %w", err)
-	}
-
 	switch provider {
 	case "antigravity":
 		if env := os.Getenv("ANTIGRAVITY_CONFIG_DIR"); env != "" {
 			return filepath.Clean(env), nil
 		}
-		geminiPath := filepath.Join(home, ".gemini", "antigravity-cli")
-		return geminiPath, nil
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolving user home directory: %w", err)
+		}
+		return filepath.Join(home, ".gemini", "antigravity-cli"), nil
 	case "claude":
 		if env := os.Getenv("CLAUDE_CONFIG_DIR"); env != "" {
 			return filepath.Clean(env), nil
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolving user home directory: %w", err)
 		}
 		return filepath.Join(home, ".claude"), nil
 	case "codex":
 		if env := os.Getenv("CODEX_CONFIG_DIR"); env != "" {
 			return filepath.Clean(env), nil
 		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolving user home directory: %w", err)
+		}
 		return filepath.Join(home, ".codex"), nil
 	case "opencode":
 		if env := os.Getenv("OPENCODE_CONFIG_DIR"); env != "" {
 			return filepath.Clean(env), nil
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolving user home directory: %w", err)
 		}
 		return filepath.Join(home, ".opencode"), nil
 	default:

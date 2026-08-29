@@ -57,7 +57,7 @@ func main() {
 		}
 	}
 
-	if timeout > 0 {
+	if timeout != 0 {
 		opts = append(opts, dipstick.WithTimeout(timeout))
 	}
 
