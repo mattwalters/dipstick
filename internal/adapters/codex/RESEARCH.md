@@ -344,13 +344,16 @@ graph TD
 
 ## 9. Schema Mapping into `dipstick.v1`
 
-| Codex `app-server` Field | Dipstick Domain Model | Confidence / Notes |
+| Codex `app-server` Field | Dipstick Domain Model (`internal/types`) | Mapping / Notes |
 |---|---|---|
-| `rateLimits.primary.usedPercent` | `WindowReport.UsedPercent` | Float (0.0 to 100.0) |
-| `rateLimits.primary.windowDurationMins` | `WindowReport.Duration` | 300 min = 5 hours |
-| `rateLimits.primary.resetsAt` | `WindowReport.ResetsAt` | Epoch timestamp -> `time.Time` (UTC) |
-| `rateLimits.secondary.usedPercent` | `WindowReport.Secondary.UsedPercent` | Weekly window |
-| `rateLimits.secondary.windowDurationMins` | `WindowReport.Secondary.Duration` | 10080 min = 7 days |
-| `rateLimits.secondary.resetsAt` | `WindowReport.Secondary.ResetsAt` | Weekly reset timestamp |
+| `rateLimits.primary.usedPercent` | `RateWindow.UsedPercent` | Float pointer (e.g. `0.0` to `100.0`) |
+| `rateLimits.primary.windowDurationMins` | `RateWindow.WindowDurationSeconds` | `300 * 60` = `18000` (5 hours) |
+| `rateLimits.primary` | `RateWindow.Label` | `"5h"` or `"primary"` |
+| `rateLimits.primary.resetsAt` | `RateWindow.ResetsAt` | Epoch seconds -> `time.Unix(s, 0).UTC()` |
+| `rateLimits.secondary.usedPercent` | `RateWindow.UsedPercent` | Float pointer for weekly window |
+| `rateLimits.secondary.windowDurationMins` | `RateWindow.WindowDurationSeconds` | `10080 * 60` = `604800` (7 days) |
+| `rateLimits.secondary` | `RateWindow.Label` | `"weekly"` or `"secondary"` |
+| `rateLimits.secondary.resetsAt` | `RateWindow.ResetsAt` | Epoch seconds -> `time.Unix(s, 0).UTC()` |
 | `rateLimits.planType` | `Identity.Plan` | `"plus"`, `"pro"`, `"team"`, etc. |
+| `account.email` | `Identity.Email` | Extracted from `account/read` |
 | `summary.lifetimeTokens` | `TokenUsage.TotalTokens` | Total lifetime token consumption |
