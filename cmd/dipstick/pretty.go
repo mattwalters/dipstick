@@ -51,6 +51,7 @@ func detectRenderOptions(w io.Writer) RenderOptions {
 
 	noColor := os.Getenv("NO_COLOR") != ""
 	clicolorForce := os.Getenv("CLICOLOR_FORCE")
+	hasForceColor := clicolorForce != "" && clicolorForce != "0"
 	clicolor := os.Getenv("CLICOLOR")
 	termEnv := strings.ToLower(os.Getenv("TERM"))
 	ciEnv := os.Getenv("CI") != ""
@@ -58,31 +59,41 @@ func detectRenderOptions(w io.Writer) RenderOptions {
 	colorEnabled := true
 	if noColor {
 		colorEnabled = false
-	} else if clicolorForce != "" && clicolorForce != "0" {
+	} else if hasForceColor {
 		colorEnabled = true
 	} else if clicolor == "0" || termEnv == "dumb" {
 		colorEnabled = false
-	} else if ciEnv && clicolorForce == "" {
+	} else if ciEnv {
 		colorEnabled = false
 	} else if !isTerminal(w) {
 		colorEnabled = false
 	}
 	opts.Color = &colorEnabled
 
-	unicodeEnabled := true
-	if termEnv == "dumb" {
-		unicodeEnabled = false
-	} else {
-		lang := strings.ToUpper(os.Getenv("LANG") + " " + os.Getenv("LC_ALL") + " " + os.Getenv("LC_CTYPE"))
-		if lang != " " && !strings.Contains(lang, "UTF-8") && !strings.Contains(lang, "UTF8") {
-			if strings.Contains(lang, " C ") || strings.Contains(lang, " POSIX ") || lang == "C" || lang == "POSIX" {
-				unicodeEnabled = false
-			}
-		}
-	}
+	unicodeEnabled := supportsUnicode()
 	opts.Unicode = &unicodeEnabled
 
 	return opts
+}
+
+func supportsUnicode() bool {
+	termEnv := strings.ToLower(os.Getenv("TERM"))
+	if termEnv == "dumb" {
+		return false
+	}
+	for _, envKey := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
+		val := strings.TrimSpace(os.Getenv(envKey))
+		if val != "" {
+			upper := strings.ToUpper(val)
+			if strings.Contains(upper, "UTF-8") || strings.Contains(upper, "UTF8") {
+				return true
+			}
+			if upper == "C" || upper == "POSIX" || strings.HasPrefix(upper, "C.") || strings.HasPrefix(upper, "POSIX.") {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 type row struct {
@@ -298,14 +309,14 @@ func RenderPretty(w io.Writer, rep *dipstick.Report, opts RenderOptions) error {
 		}
 
 		// Tokens
-		if p.Tokens != nil && (p.Tokens.TotalTokens != nil || p.Tokens.InputTokens != nil) {
-			name := ""
-			if firstRow {
-				name = pName
-				firstRow = false
-			}
+		if p.Tokens != nil {
 			tokStr := formatTokens(p.Tokens)
 			if tokStr != "" {
+				name := ""
+				if firstRow {
+					name = pName
+					firstRow = false
+				}
 				rows = append(rows, row{
 					provider: name,
 					label:    "tokens",
@@ -410,7 +421,7 @@ func formatReset(resetsAt *time.Time, now time.Time) string {
 		return ""
 	}
 	target := *resetsAt
-	if target.Before(now) {
+	if !target.After(now) {
 		return "resets now"
 	}
 
@@ -443,13 +454,21 @@ func formatTokens(t *dipstick.TokenUsage) string {
 	if t.TotalTokens != nil {
 		totalStr = formatCount(*t.TotalTokens)
 	}
-	if t.InputTokens != nil && t.OutputTokens != nil {
-		inStr := formatCount(*t.InputTokens)
-		outStr := formatCount(*t.OutputTokens)
+
+	var ioParts []string
+	if t.InputTokens != nil {
+		ioParts = append(ioParts, fmt.Sprintf("%s in", formatCount(*t.InputTokens)))
+	}
+	if t.OutputTokens != nil {
+		ioParts = append(ioParts, fmt.Sprintf("%s out", formatCount(*t.OutputTokens)))
+	}
+
+	if len(ioParts) > 0 {
+		ioStr := strings.Join(ioParts, " / ")
 		if totalStr != "" {
-			return fmt.Sprintf("%s total (%s in / %s out)", totalStr, inStr, outStr)
+			return fmt.Sprintf("%s total (%s)", totalStr, ioStr)
 		}
-		return fmt.Sprintf("%s in / %s out", inStr, outStr)
+		return ioStr
 	}
 	if totalStr != "" {
 		return fmt.Sprintf("%s total", totalStr)

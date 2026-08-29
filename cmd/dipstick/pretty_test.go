@@ -332,6 +332,18 @@ func TestDetectRenderOptions_EnvPrecedence(t *testing.T) {
 		}
 	})
 
+	t.Run("CI with CLICOLOR_FORCE=0 disables color", func(t *testing.T) {
+		_ = os.Unsetenv("NO_COLOR")
+		_ = os.Setenv("CLICOLOR_FORCE", "0")
+		_ = os.Unsetenv("CLICOLOR")
+		_ = os.Setenv("TERM", "xterm-256color")
+		_ = os.Setenv("CI", "true")
+		opts := detectRenderOptions(&bytes.Buffer{})
+		if opts.Color == nil || *opts.Color != false {
+			t.Errorf("expected Color to be false under CI with CLICOLOR_FORCE=0")
+		}
+	})
+
 	t.Run("CLICOLOR_FORCE enables color in CI", func(t *testing.T) {
 		_ = os.Unsetenv("NO_COLOR")
 		_ = os.Setenv("CLICOLOR_FORCE", "1")
@@ -340,6 +352,45 @@ func TestDetectRenderOptions_EnvPrecedence(t *testing.T) {
 		opts := detectRenderOptions(&bytes.Buffer{})
 		if opts.Color == nil || *opts.Color != true {
 			t.Errorf("expected Color to be true under CLICOLOR_FORCE in CI")
+		}
+	})
+
+	t.Run("LANG=C disables unicode", func(t *testing.T) {
+		_ = os.Unsetenv("NO_COLOR")
+		_ = os.Unsetenv("CLICOLOR_FORCE")
+		_ = os.Setenv("TERM", "xterm-256color")
+		_ = os.Unsetenv("LC_ALL")
+		_ = os.Unsetenv("LC_CTYPE")
+		_ = os.Setenv("LANG", "C")
+		opts := detectRenderOptions(&bytes.Buffer{})
+		if opts.Unicode == nil || *opts.Unicode != false {
+			t.Errorf("expected Unicode to be false under LANG=C")
+		}
+	})
+
+	t.Run("LANG=POSIX disables unicode", func(t *testing.T) {
+		_ = os.Unsetenv("NO_COLOR")
+		_ = os.Unsetenv("CLICOLOR_FORCE")
+		_ = os.Setenv("TERM", "xterm-256color")
+		_ = os.Unsetenv("LC_ALL")
+		_ = os.Unsetenv("LC_CTYPE")
+		_ = os.Setenv("LANG", "POSIX")
+		opts := detectRenderOptions(&bytes.Buffer{})
+		if opts.Unicode == nil || *opts.Unicode != false {
+			t.Errorf("expected Unicode to be false under LANG=POSIX")
+		}
+	})
+
+	t.Run("LC_CTYPE=C disables unicode", func(t *testing.T) {
+		_ = os.Unsetenv("NO_COLOR")
+		_ = os.Unsetenv("CLICOLOR_FORCE")
+		_ = os.Setenv("TERM", "xterm-256color")
+		_ = os.Unsetenv("LC_ALL")
+		_ = os.Setenv("LC_CTYPE", "C")
+		_ = os.Unsetenv("LANG")
+		opts := detectRenderOptions(&bytes.Buffer{})
+		if opts.Unicode == nil || *opts.Unicode != false {
+			t.Errorf("expected Unicode to be false under LC_CTYPE=C")
 		}
 	})
 }
@@ -452,6 +503,11 @@ func TestFormatReset(t *testing.T) {
 			expected: "resets now",
 		},
 		{
+			name:     "exact now resetsAt",
+			resetsAt: dipstick.Ptr(now),
+			expected: "resets now",
+		},
+		{
 			name:     "seconds away",
 			resetsAt: dipstick.Ptr(now.Add(45 * time.Second)),
 			expected: "resets in 45s",
@@ -520,6 +576,23 @@ func TestFormatTokensAndCount(t *testing.T) {
 		gotInOut := formatTokens(tokInOut)
 		if gotInOut != "500 in / 200 out" {
 			t.Errorf("expected '500 in / 200 out', got %q", gotInOut)
+		}
+
+		tokOnlyIn := &dipstick.TokenUsage{
+			InputTokens: dipstick.Ptr(int64(80000)),
+		}
+		gotOnlyIn := formatTokens(tokOnlyIn)
+		if gotOnlyIn != "80k in" {
+			t.Errorf("expected '80k in', got %q", gotOnlyIn)
+		}
+
+		tokTotalAndIn := &dipstick.TokenUsage{
+			TotalTokens: dipstick.Ptr(int64(100000)),
+			InputTokens: dipstick.Ptr(int64(80000)),
+		}
+		gotTotalAndIn := formatTokens(tokTotalAndIn)
+		if gotTotalAndIn != "100k total (80k in)" {
+			t.Errorf("expected '100k total (80k in)', got %q", gotTotalAndIn)
 		}
 	})
 
