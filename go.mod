@@ -1,5 +1,5 @@
 module github.com/mattwalters/dipstick
 
-go 1.25.3
+go 1.23
 
 require github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
