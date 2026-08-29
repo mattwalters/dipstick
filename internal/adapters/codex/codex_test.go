@@ -50,6 +50,15 @@ func (m *mockPipeTransport) Close() error {
 	return m.writer.Close()
 }
 
+type mockStderrTransport struct {
+	*mockPipeTransport
+	stderrText string
+}
+
+func (m *mockStderrTransport) Stderr() string {
+	return m.stderrText
+}
+
 func createMockAppServerRunner(handler func(reqMethod string, reqID int64, params json.RawMessage) (any, *mockRPCError)) codex.AppServerRunner {
 	return codex.AppServerRunnerFunc(func(ctx context.Context) (io.ReadWriteCloser, error) {
 		clientReader, serverWriter := io.Pipe()
@@ -383,6 +392,38 @@ func TestAppServerSource_ErrorHandling(t *testing.T) {
 		}
 		if !errors.Is(err, dipstick.ErrSourceTimeout) {
 			t.Errorf("expected ErrSourceTimeout, got %v", err)
+		}
+	})
+
+	t.Run("error with stderr diagnostics", func(t *testing.T) {
+		runner := codex.AppServerRunnerFunc(func(ctx context.Context) (io.ReadWriteCloser, error) {
+			clientReader, serverWriter := io.Pipe()
+			serverReader, clientWriter := io.Pipe()
+			go func() {
+				_ = serverReader.Close()
+				_ = serverWriter.Close()
+			}()
+			return &mockStderrTransport{
+				mockPipeTransport: &mockPipeTransport{
+					reader: clientReader,
+					writer: clientWriter,
+				},
+				stderrText: "fatal: failed to open database /path/state_5.sqlite: permission denied",
+			}, nil
+		})
+
+		adapter := codex.New(codex.WithAppServerRunner(runner))
+		src := adapter.Sources()[0]
+
+		_, err := src.Fetch(context.Background())
+		if err == nil {
+			t.Fatalf("expected error from closed transport")
+		}
+		if !errors.Is(err, dipstick.ErrUpstreamError) {
+			t.Errorf("expected ErrUpstreamError, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "permission denied") {
+			t.Errorf("expected stderr diagnostics in error message, got: %v", err)
 		}
 	})
 }

@@ -216,12 +216,21 @@ func (s *appServerSource) Fetch(ctx context.Context) (*types.ProviderReport, err
 
 	client := newAppServerClient(transport)
 
+	formatErr := func(msg string, err error) error {
+		if carrier, ok := transport.(interface{ Stderr() string }); ok {
+			if sErr := carrier.Stderr(); sErr != "" {
+				return fmt.Errorf("%w: %s: %v (stderr: %s)", types.ErrUpstreamError, msg, err, sErr)
+			}
+		}
+		return fmt.Errorf("%w: %s: %v", types.ErrUpstreamError, msg, err)
+	}
+
 	// 1. Handshake
 	if _, err := client.Initialize(fetchCtx); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(fetchCtx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("%w: initialize timeout: %v", types.ErrSourceTimeout, err)
 		}
-		return nil, fmt.Errorf("%w: handshake initialize failed: %v", types.ErrUpstreamError, err)
+		return nil, formatErr("handshake initialize failed", err)
 	}
 
 	// 2. Read Rate Limits
@@ -249,7 +258,7 @@ func (s *appServerSource) Fetch(ctx context.Context) (*types.ProviderReport, err
 	}
 
 	if rlErr != nil && usageErr != nil && accountErr != nil {
-		return nil, fmt.Errorf("%w: all app-server queries failed (rateLimits: %v, usage: %v, account: %v)", types.ErrUpstreamError, rlErr, usageErr, accountErr)
+		return nil, formatErr("all app-server queries failed", fmt.Errorf("rateLimits: %v, usage: %v, account: %v", rlErr, usageErr, accountErr))
 	}
 
 	var windows []types.RateWindow

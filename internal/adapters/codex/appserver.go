@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,16 @@ import (
 
 // DefaultAppServerTimeout is the default execution timeout for codex app-server stdio operations.
 const DefaultAppServerTimeout = 5 * time.Second
+
+var codexAllowedEnvKeys = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(cliexec.DefaultAllowedEnvKeys)+4)
+	for _, k := range cliexec.DefaultAllowedEnvKeys {
+		m[strings.ToUpper(k)] = struct{}{}
+	}
+	m["CODEX_HOME"] = struct{}{}
+	m["CODEX_CONFIG_DIR"] = struct{}{}
+	return m
+}()
 
 // AppServerRunner is responsible for starting a codex app-server stdio session.
 type AppServerRunner interface {
@@ -37,6 +48,7 @@ type processTransport struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
+	stderr *bytes.Buffer
 	mu     sync.Mutex
 	closed bool
 }
@@ -47,6 +59,15 @@ func (p *processTransport) Read(b []byte) (int, error) {
 
 func (p *processTransport) Write(b []byte) (int, error) {
 	return p.stdin.Write(b)
+}
+
+func (p *processTransport) Stderr() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stderr == nil {
+		return ""
+	}
+	return strings.TrimSpace(p.stderr.String())
 }
 
 func (p *processTransport) Close() error {
@@ -90,7 +111,7 @@ func defaultAppServerRunner(binaryName string) AppServerRunner {
 		}
 
 		cmd := exec.CommandContext(ctx, resolvedPath, "app-server", "--stdio")
-		cmd.Env = cliexec.ScrubEnv(os.Environ())
+		cmd.Env = cliexec.ScrubEnvWithAllowed(os.Environ(), codexAllowedEnvKeys)
 		cmd.Cancel = func() error {
 			if cmd.Process != nil {
 				return cmd.Process.Kill()
@@ -98,6 +119,9 @@ func defaultAppServerRunner(binaryName string) AppServerRunner {
 			return nil
 		}
 		cmd.WaitDelay = 500 * time.Millisecond
+
+		var stderrBuf bytes.Buffer
+		cmd.Stderr = &stderrBuf
 
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
@@ -119,6 +143,7 @@ func defaultAppServerRunner(binaryName string) AppServerRunner {
 			cmd:    cmd,
 			stdin:  stdin,
 			stdout: stdout,
+			stderr: &stderrBuf,
 		}, nil
 	})
 }
@@ -247,6 +272,7 @@ type appServerClient struct {
 	reader    *bufio.Reader
 	mu        sync.Mutex
 	nextID    int64
+	closed    bool
 }
 
 func newAppServerClient(transport io.ReadWriteCloser) *appServerClient {
@@ -276,6 +302,10 @@ func (c *appServerClient) call(ctx context.Context, method string, params any, r
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.closed {
+		return fmt.Errorf("app-server client is closed")
+	}
+
 	type writeResponse struct {
 		err error
 	}
@@ -287,6 +317,8 @@ func (c *appServerClient) call(ctx context.Context, method string, params any, r
 
 	select {
 	case <-ctx.Done():
+		c.closed = true
+		_ = c.transport.Close()
 		return ctx.Err()
 	case res := <-writeCh:
 		if res.err != nil {
@@ -309,6 +341,8 @@ func (c *appServerClient) call(ctx context.Context, method string, params any, r
 
 		select {
 		case <-ctx.Done():
+			c.closed = true
+			_ = c.transport.Close()
 			return ctx.Err()
 		case res := <-readCh:
 			if res.err != nil {
