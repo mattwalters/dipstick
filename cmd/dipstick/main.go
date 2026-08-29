@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		policyFlag     string
 		sourceFlag     string
 		strictFlag     bool
+		sinceFlag      string
 		timeoutFlag    time.Duration = dipstick.DefaultTimeout
 		sourceTimeout1 time.Duration
 		sourceTimeout2 time.Duration
@@ -69,6 +71,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&policyFlag, "policy", "", "Source policy: default, local, remote, api, cli, all")
 	fs.StringVar(&sourceFlag, "source", "", "Source policy / tier pin (alias for --policy): api, local, rpc, transcripts, cli")
 	fs.BoolVar(&strictFlag, "strict", false, "Treat drift warnings as failures")
+	fs.StringVar(&sinceFlag, "since", "", "Filter usage events since duration (e.g. 24h, 7d) or ISO-8601/RFC3339 timestamp")
 	fs.DurationVar(&timeoutFlag, "timeout", dipstick.DefaultTimeout, "Overall timeout for collection run (e.g. 5s, 1m)")
 	fs.DurationVar(&sourceTimeout1, "source-timeout", 0, "Per-source timeout for ladder resolution (e.g. 2s, 500ms)")
 	fs.DurationVar(&sourceTimeout2, "st", 0, "Per-source timeout for ladder resolution (shorthand)")
@@ -174,6 +177,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		opts = append(opts, dipstick.WithStrict(true))
 	}
 
+	if sinceFlag != "" {
+		parsedSince, err := parseSince(sinceFlag, time.Now())
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "error: invalid --since value %q: %v\n", sinceFlag, err)
+			return 2
+		}
+		opts = append(opts, dipstick.WithSince(parsedSince))
+	}
+
 	if doctorFlag {
 		return executeDoctor(opts, jsonFlag, stdout, stderr)
 	}
@@ -256,6 +268,7 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 		policyFlag     string
 		sourceFlag     string
 		strictFlag     bool
+		sinceFlag      string
 		timeoutFlag    time.Duration = dipstick.DefaultTimeout
 		sourceTimeout1 time.Duration
 		sourceTimeout2 time.Duration
@@ -268,6 +281,7 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&policyFlag, "policy", "", "Source policy: default, local, remote, api, cli, all")
 	fs.StringVar(&sourceFlag, "source", "", "Source policy / tier pin (alias for --policy)")
 	fs.BoolVar(&strictFlag, "strict", false, "Treat drift warnings as failures")
+	fs.StringVar(&sinceFlag, "since", "", "Filter usage events since duration or timestamp")
 	fs.DurationVar(&timeoutFlag, "timeout", dipstick.DefaultTimeout, "Overall timeout for doctor run")
 	fs.DurationVar(&sourceTimeout1, "source-timeout", 0, "Per-source timeout for ladder resolution")
 	fs.DurationVar(&sourceTimeout2, "st", 0, "Per-source timeout for ladder resolution (shorthand)")
@@ -351,5 +365,71 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 		opts = append(opts, dipstick.WithStrict(true))
 	}
 
+	if sinceFlag != "" {
+		parsedSince, err := parseSince(sinceFlag, time.Now())
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "error: invalid --since value %q: %v\n", sinceFlag, err)
+			return 2
+		}
+		opts = append(opts, dipstick.WithSince(parsedSince))
+	}
+
 	return executeDoctor(opts, jsonFlag, stdout, stderr)
+}
+
+func parseSince(s string, now time.Time) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, nil
+	}
+
+	// Check for days (e.g. "7d", "1d")
+	if strings.HasSuffix(s, "d") || strings.HasSuffix(s, "D") {
+		numStr := s[:len(s)-1]
+		days, err := strconv.ParseFloat(numStr, 64)
+		if err == nil {
+			if days < 0 {
+				return time.Time{}, fmt.Errorf("duration cannot be negative")
+			}
+			d := time.Duration(days * float64(24*time.Hour))
+			return now.Add(-d).UTC(), nil
+		}
+	}
+
+	// Check for weeks (e.g. "1w", "2w")
+	if strings.HasSuffix(s, "w") || strings.HasSuffix(s, "W") {
+		numStr := s[:len(s)-1]
+		weeks, err := strconv.ParseFloat(numStr, 64)
+		if err == nil {
+			if weeks < 0 {
+				return time.Time{}, fmt.Errorf("duration cannot be negative")
+			}
+			d := time.Duration(weeks * float64(7*24*time.Hour))
+			return now.Add(-d).UTC(), nil
+		}
+	}
+
+	// Check for standard time.Duration (e.g. "24h", "30m", "1h30m")
+	if dur, err := time.ParseDuration(s); err == nil {
+		if dur < 0 {
+			return time.Time{}, fmt.Errorf("duration cannot be negative")
+		}
+		return now.Add(-dur).UTC(), nil
+	}
+
+	// Try RFC3339 / ISO-8601 formats
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02T15:04:05",
+		"2006-01-02",
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
+			return t.UTC(), nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("unrecognized format %q (expected duration like 24h, 7d or RFC3339 timestamp)", s)
 }

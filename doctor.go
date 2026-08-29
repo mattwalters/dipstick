@@ -178,7 +178,7 @@ func Doctor(ctx context.Context, opts ...Option) (*DoctorReport, error) {
 		if custom, ok := cfg.adapters[pID]; ok {
 			adp = custom
 		} else {
-			adp = defaultAdapterRegistry[pID]()
+			adp = defaultAdapterRegistry[pID](cfg)
 		}
 
 		pReport := diagnoseProvider(ctx, pID, adp, cfg)
@@ -239,7 +239,7 @@ func diagnoseProvider(ctx context.Context, pID ProviderID, adp Adapter, cfg *con
 	if adp != nil && adp.Compat().VerifiedRange != "" {
 		compatRange = adp.Compat().VerifiedRange
 	} else if createAdp, ok := defaultAdapterRegistry[pID]; ok {
-		compatRange = createAdp().Compat().VerifiedRange
+		compatRange = createAdp(cfg).Compat().VerifiedRange
 	}
 
 	if !installed {

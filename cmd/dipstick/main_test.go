@@ -155,6 +155,21 @@ func TestRun_ExitCode2_BadInvocations(t *testing.T) {
 			errContains: "unexpected argument",
 		},
 		{
+			name:        "invalid since flag",
+			args:        []string{"--since", "not-a-date"},
+			errContains: "invalid --since value",
+		},
+		{
+			name:        "negative since duration",
+			args:        []string{"--since", "-24h"},
+			errContains: "invalid --since value",
+		},
+		{
+			name:        "doctor invalid since flag",
+			args:        []string{"doctor", "--since", "bad-date"},
+			errContains: "invalid --since value",
+		},
+		{
 			name:        "doctor unknown flag",
 			args:        []string{"doctor", "--nonexistent-flag"},
 			errContains: "flag provided but not defined",
@@ -441,6 +456,7 @@ func TestRun_OptionPassing(t *testing.T) {
 		"-p", "codex",
 		"--policy", "local",
 		"--strict",
+		"--since", "24h",
 		"-timeout", "15s",
 		"-source-timeout", "3s",
 	}
@@ -481,6 +497,67 @@ func TestRun_StrictFlag(t *testing.T) {
 
 	if len(receivedOpts) == 0 {
 		t.Fatalf("expected options to be passed to collectFn")
+	}
+}
+
+func TestParseSince(t *testing.T) {
+	refNow := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		input       string
+		expected    time.Time
+		expectError bool
+	}{
+		{
+			input:    "",
+			expected: time.Time{},
+		},
+		{
+			input:    "24h",
+			expected: refNow.Add(-24 * time.Hour),
+		},
+		{
+			input:    "7d",
+			expected: refNow.Add(-7 * 24 * time.Hour),
+		},
+		{
+			input:    "2w",
+			expected: refNow.Add(-14 * 24 * time.Hour),
+		},
+		{
+			input:    "2026-08-20T10:00:00Z",
+			expected: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			input:    "2026-08-20",
+			expected: time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			input:       "-5h",
+			expectError: true,
+		},
+		{
+			input:       "invalid-date",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := parseSince(tt.input, refNow)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error for input %q, got %v", tt.input, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for input %q: %v", tt.input, err)
+			}
+			if !got.Equal(tt.expected) {
+				t.Errorf("parseSince(%q): want %v, got %v", tt.input, tt.expected, got)
+			}
+		})
 	}
 }
 
@@ -714,7 +791,7 @@ func TestSubprocess_ExitCodes(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		cmd := exec.CommandContext(ctx, testBinaryPath, "-p", "claude", "--pretty")
+		cmd := exec.CommandContext(ctx, testBinaryPath, "-p", "opencode", "--pretty")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -727,8 +804,48 @@ func TestSubprocess_ExitCodes(t *testing.T) {
 		if exitErr.ExitCode() != 1 {
 			t.Errorf("expected exit code 1, got %d", exitErr.ExitCode())
 		}
-		if !strings.Contains(stdout.String(), "claude") {
+		if !strings.Contains(stdout.String(), "opencode") {
 			t.Errorf("expected stdout to contain provider names in pretty format, got %s", stdout.String())
+		}
+	})
+
+	t.Run("subprocess offline policy transcript collection", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, testBinaryPath, "-p", "claude", "--policy", "offline", "--json")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		if err != nil {
+			t.Fatalf("expected exit code 0 on offline claude scan, got %v. stderr: %s", err, stderr.String())
+		}
+
+		var rep dipstick.Report
+		if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+			t.Fatalf("failed unmarshaling report: %v\nstdout: %s", err, stdout.String())
+		}
+
+		if len(rep.Providers) != 1 {
+			t.Fatalf("expected 1 provider in report, got %d", len(rep.Providers))
+		}
+
+		p := rep.Providers[0]
+		if p.Provider != dipstick.ProviderClaude {
+			t.Errorf("Provider: got %q, want claude", p.Provider)
+		}
+		if p.Source != dipstick.SourceTranscript {
+			t.Errorf("Source: got %q, want transcript", p.Source)
+		}
+		if p.Confidence != dipstick.ConfidenceDerived {
+			t.Errorf("Confidence: got %q, want derived", p.Confidence)
+		}
+		if len(p.Windows) != 0 {
+			t.Errorf("Windows: expected empty windows from transcript source, got %d", len(p.Windows))
+		}
+		if p.Tokens == nil {
+			t.Fatalf("Tokens: expected non-nil token usage")
 		}
 	})
 }
