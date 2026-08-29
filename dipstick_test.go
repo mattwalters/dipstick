@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mattwalters/dipstick"
 	"github.com/santhosh-tekuri/jsonschema/v5"
+
+	"github.com/mattwalters/dipstick"
 )
 
 // findError returns the ProviderError recorded for id, if any.

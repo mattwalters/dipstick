@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mattwalters/dipstick"
 	"github.com/santhosh-tekuri/jsonschema/v5"
+
+	"github.com/mattwalters/dipstick"
 )
 
 func fullReportFixture() dipstick.Report {
