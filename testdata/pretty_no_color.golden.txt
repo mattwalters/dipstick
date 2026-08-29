@@ -1,0 +1,7 @@
+ claude       plan     Pro · Acme Corp · user@example.com
+              session  ▓▓░░░░░░░░   16%   resets in 5h
+              weekly   ▓▓▓▓░░░░░░   42%   resets Tue 00:00
+              tokens   159k total (125k in / 34k out)
+ codex        account  dev@example.com
+              primary  ░░░░░░░░░░    0%   resets in 1h
+ antigravity  —        antigravity exposes no usage or quota surface (not_supported)

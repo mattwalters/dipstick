@@ -41,6 +41,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 
 	var (
+		prettyFlag     bool
 		jsonFlag       bool
 		providerFlag   string
 		providersFlag  string
@@ -55,6 +56,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		vFlag          bool
 	)
 
+	fs.BoolVar(&prettyFlag, "pretty", false, "Output pretty styled report to stdout")
 	fs.BoolVar(&jsonFlag, "json", false, "Output dipstick.v1 report to stdout as JSON")
 	fs.StringVar(&providerFlag, "provider", "", "Comma-separated list of providers to collect (alias for --providers)")
 	fs.StringVar(&providersFlag, "providers", "", "Comma-separated list of providers to collect (default: all)")
@@ -81,6 +83,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
+		return 2
+	}
+
+	if jsonFlag && prettyFlag {
+		_, _ = fmt.Fprintf(stderr, "error: cannot specify both --json and --pretty\n")
 		return 2
 	}
 
@@ -169,11 +176,28 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(report); err != nil {
-		_, _ = fmt.Fprintf(stderr, "error encoding report: %v\n", err)
-		return 2
+	usePretty := false
+	if prettyFlag {
+		usePretty = true
+	} else if jsonFlag {
+		usePretty = false
+	} else {
+		usePretty = isTerminal(stdout)
+	}
+
+	if usePretty {
+		renderOpts := detectRenderOptions(stdout)
+		if err := RenderPretty(stdout, report, renderOpts); err != nil {
+			_, _ = fmt.Fprintf(stderr, "error rendering pretty report: %v\n", err)
+			return 2
+		}
+	} else {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			_, _ = fmt.Fprintf(stderr, "error encoding report: %v\n", err)
+			return 2
+		}
 	}
 
 	if len(report.Providers) == 0 {
