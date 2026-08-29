@@ -526,3 +526,90 @@ func TestScrubEnv_Unit(t *testing.T) {
 		}
 	}
 }
+
+func TestRun_CompletelyScrubbedEnvDoesNotInheritParent(t *testing.T) {
+	t.Setenv("SENSITIVE_HOST_VAR", "should_not_leak_to_child")
+	runner := cliexec.New(
+		cliexec.WithEnv([]string{"UNMATCHED_VAR=123"}),
+		cliexec.WithAllowedEnvKeys("NON_EXISTENT_KEY"),
+		cliexec.WithPermittedArgv([]string{"dump-env"}),
+	)
+
+	ctx := context.Background()
+	res, err := runner.Run(ctx, fakeCliBin, "dump-env")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := res.StdoutString()
+	if strings.Contains(out, "SENSITIVE_HOST_VAR") {
+		t.Errorf("ambient parent environment leaked to child when filtered env was empty: %q", out)
+	}
+	if strings.Contains(out, "UNMATCHED_VAR") {
+		t.Errorf("unmatched variable was not scrubbed: %q", out)
+	}
+}
+
+func TestRun_ZeroByteOutputCap(t *testing.T) {
+	runner := cliexec.New(
+		cliexec.WithMaxOutputBytes(0),
+		cliexec.WithPermittedArgv([]string{"oversized"}),
+	)
+
+	ctx := context.Background()
+	res, err := runner.Run(ctx, fakeCliBin, "oversized")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(res.Stdout) != 0 {
+		t.Errorf("expected 0 bytes stdout with limit 0, got %d", len(res.Stdout))
+	}
+	if len(res.Stderr) != 0 {
+		t.Errorf("expected 0 bytes stderr with limit 0, got %d", len(res.Stderr))
+	}
+}
+
+func TestProbeVersion_ContextCancelWaitingCaller(t *testing.T) {
+	cliexec.ClearVersionCache()
+	defer cliexec.ClearVersionCache()
+
+	cache := cliexec.NewVersionCache()
+	runner := cliexec.New(
+		cliexec.WithPermittedArgv([]string{"--version"}),
+		cliexec.WithVersionCache(cache),
+		cliexec.WithExtraEnv("FAKECLI_VERSION_DELAY=300ms"),
+	)
+
+	ctxSlow, cancelSlow := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelSlow()
+
+	ctxFast, cancelFast := context.WithCancel(context.Background())
+
+	startedLeader := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Leader caller
+	go func() {
+		defer wg.Done()
+		close(startedLeader)
+		_, _ = runner.ProbeVersion(ctxSlow, fakeCliBin)
+	}()
+
+	// Secondary caller with immediate cancel
+	var fastErr error
+	go func() {
+		defer wg.Done()
+		<-startedLeader
+		time.Sleep(10 * time.Millisecond)
+		cancelFast()
+		_, fastErr = runner.ProbeVersion(ctxFast, fakeCliBin)
+	}()
+
+	wg.Wait()
+
+	if !errors.Is(fastErr, context.Canceled) {
+		t.Errorf("expected secondary caller to return context.Canceled, got: %v", fastErr)
+	}
+}

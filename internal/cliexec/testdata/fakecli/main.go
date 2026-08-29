@@ -28,6 +28,11 @@ func main() {
 
 	switch args[0] {
 	case "--version", "-v", "-V", "-version", "version":
+		if delayStr := os.Getenv("FAKECLI_VERSION_DELAY"); delayStr != "" {
+			if delay, err := time.ParseDuration(delayStr); err == nil {
+				time.Sleep(delay)
+			}
+		}
 		fmt.Println("fakecli version 2.4.0 (x86_64-fake-platform)")
 	case "--help", "-h", "help":
 		fmt.Println("fakecli: a helper binary for testing cliexec")

@@ -186,6 +186,7 @@ func WithTimeout(d time.Duration) Option {
 }
 
 // WithMaxOutputBytes sets the maximum byte size captured for stdout and stderr separately.
+// A negative value denotes unbounded output. A value of 0 enforces zero-byte capture.
 func WithMaxOutputBytes(n int) Option {
 	return func(r *Runner) {
 		r.MaxOutputBytes = n
@@ -293,6 +294,7 @@ func ResolveBinary(name string) (string, error) {
 }
 
 // ScrubEnv filters an environment variable list down to DefaultAllowedEnvKeys.
+// It always returns a non-nil slice.
 func ScrubEnv(env []string) []string {
 	allowed := make(map[string]struct{}, len(DefaultAllowedEnvKeys))
 	for _, k := range DefaultAllowedEnvKeys {
@@ -302,8 +304,9 @@ func ScrubEnv(env []string) []string {
 }
 
 // ScrubEnvWithAllowed filters an environment variable list against a given set of uppercase allowed keys.
+// It always returns a non-nil slice.
 func ScrubEnvWithAllowed(env []string, allowedKeys map[string]struct{}) []string {
-	var clean []string
+	clean := make([]string, 0)
 	for _, kv := range env {
 		trimmed := strings.TrimSpace(kv)
 		if trimmed == "" {
@@ -356,7 +359,7 @@ func newLimitWriter(limit int) *limitWriter {
 }
 
 func (w *limitWriter) Write(p []byte) (int, error) {
-	if w.limit <= 0 {
+	if w.limit < 0 {
 		return w.buf.Write(p)
 	}
 	remaining := w.limit - w.buf.Len()
@@ -418,15 +421,25 @@ func (r *Runner) Run(ctx context.Context, name string, args ...string) (*Result,
 		baseEnv = os.Environ()
 	}
 
+	var childEnv []string
 	if r.ScrubEnv {
-		cmd.Env = ScrubEnvWithAllowed(baseEnv, r.AllowedEnvKeys)
+		childEnv = ScrubEnvWithAllowed(baseEnv, r.AllowedEnvKeys)
 	} else {
-		cmd.Env = append([]string(nil), baseEnv...)
+		childEnv = make([]string, len(baseEnv))
+		copy(childEnv, baseEnv)
 	}
 
 	if len(r.ExtraEnv) > 0 {
-		cmd.Env = append(cmd.Env, r.ExtraEnv...)
+		childEnv = append(childEnv, r.ExtraEnv...)
 	}
+
+	// os/exec interprets cmd.Env == nil as an instruction to inherit the parent process os.Environ().
+	// Ensure cmd.Env is always a non-nil slice (even when empty) so that an empty/scrubbed environment
+	// is strictly preserved without leaking ambient parent variables.
+	if childEnv == nil {
+		childEnv = []string{}
+	}
+	cmd.Env = childEnv
 
 	stdoutWriter := newLimitWriter(r.MaxOutputBytes)
 	stderrWriter := newLimitWriter(r.MaxOutputBytes)
@@ -465,9 +478,9 @@ func Run(ctx context.Context, name string, args ...string) (*Result, error) {
 }
 
 type versionCall struct {
-	wg  sync.WaitGroup
-	val string
-	err error
+	done chan struct{}
+	val  string
+	err  error
 }
 
 // VersionCache is a thread-safe in-memory cache for CLI version probe outputs.
@@ -536,12 +549,20 @@ func (c *VersionCache) Probe(ctx context.Context, runner *Runner, binary string)
 
 	call, exists := c.calls[resolvedPath]
 	if !exists {
-		call = &versionCall{}
-		call.wg.Add(1)
+		call = &versionCall{
+			done: make(chan struct{}),
+		}
 		c.calls[resolvedPath] = call
 		c.mu.Unlock()
 
+		defer func() {
+			c.mu.Lock()
+			delete(c.calls, resolvedPath)
+			c.mu.Unlock()
+		}()
+
 		res, runErr := runner.Run(ctx, resolvedPath, "--version")
+		c.mu.Lock()
 		if runErr != nil {
 			call.err = fmt.Errorf("cliexec: probe version for %q: %w", binary, runErr)
 		} else {
@@ -550,22 +571,22 @@ func (c *VersionCache) Probe(ctx context.Context, runner *Runner, binary string)
 				out = res.StderrString()
 			}
 			call.val = out
-		}
-
-		c.mu.Lock()
-		if call.err == nil {
 			c.items[resolvedPath] = call.val
 		}
-		delete(c.calls, resolvedPath)
-		call.wg.Done()
+		close(call.done)
 		c.mu.Unlock()
 
 		return call.val, call.err
 	}
 
 	c.mu.Unlock()
-	call.wg.Wait()
-	return call.val, call.err
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-call.done:
+		return call.val, call.err
+	}
 }
 
 // ProbeVersion probes the binary version using runner configuration and its VersionCache.
