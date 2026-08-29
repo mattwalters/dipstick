@@ -228,7 +228,22 @@ func (s *OAuthAPISource) Fetch(ctx context.Context) (*dipstick.ProviderReport, e
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB limit
 	if err != nil {
-		return nil, fmt.Errorf("%w: reading response body: %v", dipstick.ErrUpstreamError, err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if reqCtx.Err() != nil {
+			if errors.Is(reqCtx.Err(), context.DeadlineExceeded) {
+				return nil, fmt.Errorf("%w: reading response body timed out: %v", dipstick.ErrTimeout, reqCtx.Err())
+			}
+			if errors.Is(reqCtx.Err(), context.Canceled) {
+				return nil, reqCtx.Err()
+			}
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return nil, fmt.Errorf("%w: reading response body timed out: %v", dipstick.ErrTimeout, err)
+		}
+		return nil, fmt.Errorf("%w: reading response body: %v", dipstick.ErrUpstreamError, scrub.Scrub(err.Error()))
 	}
 
 	switch resp.StatusCode {

@@ -590,6 +590,39 @@ func TestOAuthAPISource_Fetch_TimeoutAndCancellation(t *testing.T) {
 			t.Errorf("expected context.Canceled, got %v", err)
 		}
 	})
+
+	t.Run("slow streaming response body triggers ErrTimeout", func(t *testing.T) {
+		slowBodyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			time.Sleep(200 * time.Millisecond)
+			_, _ = w.Write([]byte(`{"five_hour": {"utilization": 0}}`))
+		}))
+		defer slowBodyServer.Close()
+
+		src := claude.NewOAuthAPISource(
+			claude.WithBaseURL(slowBodyServer.URL),
+			claude.WithHTTPClient(slowBodyServer.Client()),
+			claude.WithTimeout(30*time.Millisecond),
+			claude.WithNow(func() time.Time { return now }),
+			claude.WithCredentialResolver(func(ctx context.Context) (*localstate.ClaudeCredentials, error) {
+				return &localstate.ClaudeCredentials{
+					AccessToken: "sk-ant-test-token",
+					ExpiresAt:   &future,
+				}, nil
+			}),
+		)
+
+		_, err := src.Fetch(context.Background())
+		if err == nil {
+			t.Fatalf("expected timeout error for slow response body")
+		}
+		if !errors.Is(err, dipstick.ErrTimeout) {
+			t.Errorf("expected ErrTimeout, got %v", err)
+		}
+	})
 }
 
 func TestOAuthAPISource_Security_ZeroTokenLeakage(t *testing.T) {
