@@ -194,15 +194,16 @@ func TestRun_GoldenOutputByteIdentical(t *testing.T) {
 }
 
 func TestRun_SubcommandsAndVersion(t *testing.T) {
+	expectedVersion := fmt.Sprintf("dipstick %s (commit: %s, built: %s)\n", Version, Commit, Date)
+
 	t.Run("version subcommand", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		code := run([]string{"version"}, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("expected exit code 0, got %d", code)
 		}
-		expected := fmt.Sprintf("dipstick %s\n", Version)
-		if stdout.String() != expected {
-			t.Errorf("expected %q, got %q", expected, stdout.String())
+		if stdout.String() != expectedVersion {
+			t.Errorf("expected %q, got %q", expectedVersion, stdout.String())
 		}
 		if stderr.Len() != 0 {
 			t.Errorf("expected empty stderr, got %q", stderr.String())
@@ -215,9 +216,8 @@ func TestRun_SubcommandsAndVersion(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("expected exit code 0, got %d", code)
 		}
-		expected := fmt.Sprintf("dipstick %s\n", Version)
-		if stdout.String() != expected {
-			t.Errorf("expected %q, got %q", expected, stdout.String())
+		if stdout.String() != expectedVersion {
+			t.Errorf("expected %q, got %q", expectedVersion, stdout.String())
 		}
 	})
 
@@ -227,9 +227,8 @@ func TestRun_SubcommandsAndVersion(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("expected exit code 0, got %d", code)
 		}
-		expected := fmt.Sprintf("dipstick %s\n", Version)
-		if stdout.String() != expected {
-			t.Errorf("expected %q, got %q", expected, stdout.String())
+		if stdout.String() != expectedVersion {
+			t.Errorf("expected %q, got %q", expectedVersion, stdout.String())
 		}
 	})
 
@@ -426,7 +425,7 @@ func TestSubprocess_ExitCodes(t *testing.T) {
 		}
 	})
 
-	t.Run("exit code 0 on version", func(t *testing.T) {
+	t.Run("exit code 0 on version subcommand", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
@@ -437,8 +436,43 @@ func TestSubprocess_ExitCodes(t *testing.T) {
 		if err := cmd.Run(); err != nil {
 			t.Fatalf("expected exit code 0 for version, got %v, stderr: %s", err, stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "dipstick") {
-			t.Errorf("expected stdout to contain 'dipstick', got %s", stdout.String())
+		expected := "dipstick dev (commit: none, built: unknown)\n"
+		if stdout.String() != expected {
+			t.Errorf("expected %q, got %q", expected, stdout.String())
+		}
+	})
+
+	t.Run("exit code 0 on --version flag", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, testBinaryPath, "--version")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("expected exit code 0 for --version, got %v, stderr: %s", err, stderr.String())
+		}
+		expected := "dipstick dev (commit: none, built: unknown)\n"
+		if stdout.String() != expected {
+			t.Errorf("expected %q, got %q", expected, stdout.String())
+		}
+	})
+
+	t.Run("exit code 0 on injected metadata", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		ldflags := "-X main.Version=v0.1.0 -X main.Commit=abcdef1 -X main.Date=2026-08-29T20:00:00Z"
+		cmd := exec.CommandContext(ctx, "go", "run", "-ldflags", ldflags, ".", "version")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("go run failed: %v, output: %s", err, string(out))
+		}
+
+		expected := "dipstick v0.1.0 (commit: abcdef1, built: 2026-08-29T20:00:00Z)\n"
+		if string(out) != expected {
+			t.Errorf("expected version output %q, got %q", expected, string(out))
 		}
 	})
 }

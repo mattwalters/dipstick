@@ -1,0 +1,53 @@
+version: 2
+
+project_name: dipstick
+
+builds:
+  - id: dipstick
+    main: ./cmd/dipstick
+    binary: dipstick
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.Version={{.Version}} -X main.Commit={{.Commit}} -X main.Date={{.Date}}
+
+archives:
+  - id: dipstick
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^Merge pull request'
+      - '^Merge branch'
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))?:\s*(.*)'
+      order: 0
+    - title: 'Bug Fixes'
+      regexp: '^.*?fix(\([[:word:]]+\))?:\s*(.*)'
+      order: 1
+    - title: 'Performance Improvements'
+      regexp: '^.*?perf(\([[:word:]]+\))?:\s*(.*)'
+      order: 2
+    - title: 'Documentation'
+      regexp: '^.*?docs(\([[:word:]]+\))?:\s*(.*)'
+      order: 3
+    - title: 'Others'
+      order: 999
