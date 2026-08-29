@@ -18,6 +18,7 @@ var (
 type ResolverConfig struct {
 	SourcePolicy  SourcePolicy
 	SourceTimeout time.Duration
+	Strict        bool
 }
 
 // Resolver orchestrates tiered source-ladder resolution across configured adapters concurrently.
@@ -25,6 +26,7 @@ type Resolver struct {
 	adapters      map[ProviderID]Adapter
 	sourcePolicy  SourcePolicy
 	sourceTimeout time.Duration
+	strict        bool
 }
 
 // NewResolver creates a new Resolver instance.
@@ -47,6 +49,7 @@ func NewResolver(adapters map[ProviderID]Adapter, cfg ResolverConfig) *Resolver 
 		adapters:      adps,
 		sourcePolicy:  sourcePolicy,
 		sourceTimeout: sourceTimeout,
+		strict:        cfg.Strict,
 	}
 }
 
