@@ -2,6 +2,7 @@ package dipstick
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -65,71 +66,72 @@ func (pw *providerWrapper) Collect(ctx context.Context, cfg Config) (ProviderRep
 	return pw.collect(ctx, cfg)
 }
 
+// notCollecting builds a Provider that has no usage surface to read yet and
+// says so as a ProviderError rather than as an empty ProviderReport.
+//
+// This is what the dipstick.v1 contract requires of a stub: every entry in
+// Report.Providers must carry a real source and confidence, naming the tier
+// its numbers actually came from, so a provider with nothing to say cannot
+// appear there honestly. Report.Errors is where it belongs until the
+// source-ladder resolver lands and these adapters start reading anything.
+func notCollecting(id ProviderID, detail string) Provider {
+	return &providerWrapper{
+		id: id,
+		collect: func(ctx context.Context, cfg Config) (ProviderReport, error) {
+			if err := ctx.Err(); err != nil {
+				return ProviderReport{}, err
+			}
+			return ProviderReport{}, ProviderError{
+				Provider:  id,
+				Reason:    ReasonNotSupported,
+				Detail:    detail,
+				Retryable: false,
+			}
+		},
+	}
+}
+
 var adapterRegistry = map[ProviderID]func() Provider{
 	ProviderAntigravity: func() Provider {
 		_ = antigravity.New()
-		return &providerWrapper{
-			id: ProviderAntigravity,
-			collect: func(ctx context.Context, cfg Config) (ProviderReport, error) {
-				if err := ctx.Err(); err != nil {
-					return ProviderReport{}, err
-				}
-				return ProviderReport{
-					ProviderID: ProviderAntigravity,
-					Usage:      Usage{},
-				}, nil
-			},
-		}
+		return notCollecting(ProviderAntigravity, "antigravity exposes no usage or quota surface")
 	},
 	ProviderClaude: func() Provider {
 		_ = claude.New()
-		return &providerWrapper{
-			id: ProviderClaude,
-			collect: func(ctx context.Context, cfg Config) (ProviderReport, error) {
-				if err := ctx.Err(); err != nil {
-					return ProviderReport{}, err
-				}
-				return ProviderReport{
-					ProviderID: ProviderClaude,
-					Usage:      Usage{},
-				}, nil
-			},
-		}
+		return notCollecting(ProviderClaude, "claude usage collection is not implemented yet")
 	},
 	ProviderCodex: func() Provider {
 		_ = codex.New()
-		return &providerWrapper{
-			id: ProviderCodex,
-			collect: func(ctx context.Context, cfg Config) (ProviderReport, error) {
-				if err := ctx.Err(); err != nil {
-					return ProviderReport{}, err
-				}
-				return ProviderReport{
-					ProviderID: ProviderCodex,
-					Usage:      Usage{},
-				}, nil
-			},
-		}
+		return notCollecting(ProviderCodex, "codex usage collection is not implemented yet")
 	},
 	ProviderOpenCode: func() Provider {
 		_ = opencode.New()
-		return &providerWrapper{
-			id: ProviderOpenCode,
-			collect: func(ctx context.Context, cfg Config) (ProviderReport, error) {
-				if err := ctx.Err(); err != nil {
-					return ProviderReport{}, err
-				}
-				return ProviderReport{
-					ProviderID: ProviderOpenCode,
-					Usage:      Usage{},
-				}, nil
-			},
-		}
+		return notCollecting(ProviderOpenCode, "opencode usage collection is not implemented yet")
 	},
 }
 
+// providerErrorFor normalizes an adapter's error into the report's error
+// model. An adapter that classified its own failure keeps that classification;
+// anything else is an uncategorized upstream error, which is the one reason
+// that does not claim to know more than we do.
+func providerErrorFor(id ProviderID, err error) ProviderError {
+	var pe ProviderError
+	if errors.As(err, &pe) {
+		if pe.Provider == "" {
+			pe.Provider = id
+		}
+		return pe
+	}
+	return ProviderError{
+		Provider:  id,
+		Reason:    ReasonUpstreamError,
+		Detail:    err.Error(),
+		Retryable: false,
+	}
+}
+
 // Collect gathers usage reports from configured providers.
-// Single provider failures are recorded in the Report under the respective ProviderReport.
+// Single provider failures are recorded in Report.Errors.
 // Whole-run failures (such as invalid configuration or cancelled context) return an error.
 func Collect(ctx context.Context, opts ...Option) (*Report, error) {
 	if ctx == nil {
@@ -176,9 +178,12 @@ func Collect(ctx context.Context, opts ...Option) (*Report, error) {
 		}
 	}
 
+	// Non-nil so a run that collects nothing marshals "providers": [], which
+	// the schema requires present; a nil slice would encode as null.
 	report := &Report{
-		CollectedAt: time.Now().UTC(),
-		Providers:   make(map[ProviderID]ProviderReport, len(ordered)),
+		SchemaVersion: SchemaVersion,
+		GeneratedAt:   time.Now().UTC(),
+		Providers:     make([]ProviderReport, 0, len(ordered)),
 	}
 
 	providerCfg := Config{
@@ -199,16 +204,17 @@ func Collect(ctx context.Context, opts ...Option) (*Report, error) {
 		}
 
 		if err != nil {
-			report.Providers[id] = ProviderReport{
-				ProviderID: id,
-				Err:        err,
-			}
-		} else {
-			if pr.ProviderID == "" {
-				pr.ProviderID = id
-			}
-			report.Providers[id] = pr
+			report.Errors = append(report.Errors, providerErrorFor(id, err))
+			continue
 		}
+
+		if pr.Provider == "" {
+			pr.Provider = id
+		}
+		if pr.ObservedAt.IsZero() {
+			pr.ObservedAt = report.GeneratedAt
+		}
+		report.Providers = append(report.Providers, pr)
 	}
 
 	if err := ctx.Err(); err != nil {

@@ -3,12 +3,23 @@ package dipstick_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/mattwalters/dipstick"
+	"github.com/santhosh-tekuri/jsonschema/v5"
 )
+
+// findError returns the ProviderError recorded for id, if any.
+func findError(report *dipstick.Report, id dipstick.ProviderID) (dipstick.ProviderError, bool) {
+	for _, pe := range report.Errors {
+		if pe.Provider == id {
+			return pe, true
+		}
+	}
+	return dipstick.ProviderError{}, false
+}
 
 func TestProviders(t *testing.T) {
 	providers := dipstick.Providers()
@@ -46,23 +57,31 @@ func TestCollect_Default(t *testing.T) {
 		return
 	}
 
-	if report.CollectedAt.IsZero() {
-		t.Errorf("expected non-zero CollectedAt")
+	if report.SchemaVersion != dipstick.SchemaVersion {
+		t.Errorf("expected schema version %q, got %q", dipstick.SchemaVersion, report.SchemaVersion)
 	}
 
-	all := dipstick.Providers()
-	for _, id := range all {
-		pr, ok := report.Providers[id]
+	if report.GeneratedAt.IsZero() {
+		t.Errorf("expected non-zero GeneratedAt")
+	}
+
+	// The adapters are stubs until the source-ladder resolver lands, so each
+	// provider is accounted for as a not_supported error rather than as a
+	// provider report: dipstick.v1 has no way to spell "collected nothing"
+	// inside a ProviderReport.
+	for _, id := range dipstick.Providers() {
+		pe, ok := findError(report, id)
 		if !ok {
-			t.Errorf("missing provider %s in report", id)
+			t.Errorf("missing provider %s in report errors", id)
 			continue
 		}
-		if pr.ProviderID != id {
-			t.Errorf("expected ProviderID %s, got %s", id, pr.ProviderID)
+		if pe.Reason != dipstick.ReasonNotSupported {
+			t.Errorf("provider %s: expected reason %s, got %s", id, dipstick.ReasonNotSupported, pe.Reason)
 		}
-		if pr.Err != nil {
-			t.Errorf("unexpected error for provider %s: %v", id, pr.Err)
-		}
+	}
+
+	if len(report.Providers) != 0 {
+		t.Errorf("expected no provider reports from stub adapters, got %d", len(report.Providers))
 	}
 }
 
@@ -89,17 +108,17 @@ func TestCollect_WithProviders(t *testing.T) {
 		return
 	}
 
-	if len(report.Providers) != 2 {
-		t.Fatalf("expected 2 unique providers, got %d", len(report.Providers))
+	if len(report.Errors) != 2 {
+		t.Fatalf("expected 2 unique providers, got %d", len(report.Errors))
 	}
 
-	if _, ok := report.Providers[dipstick.ProviderClaude]; !ok {
+	if _, ok := findError(report, dipstick.ProviderClaude); !ok {
 		t.Errorf("expected claude provider in report")
 	}
-	if _, ok := report.Providers[dipstick.ProviderAntigravity]; !ok {
+	if _, ok := findError(report, dipstick.ProviderAntigravity); !ok {
 		t.Errorf("expected antigravity provider in report")
 	}
-	if _, ok := report.Providers[dipstick.ProviderCodex]; ok {
+	if _, ok := findError(report, dipstick.ProviderCodex); ok {
 		t.Errorf("did not expect codex provider in report")
 	}
 }
@@ -154,55 +173,6 @@ func TestCollect_WithSourcePolicy(t *testing.T) {
 	}
 }
 
-func TestProviderReport_JSON(t *testing.T) {
-	pr := dipstick.ProviderReport{
-		ProviderID: dipstick.ProviderClaude,
-		Usage: dipstick.Usage{
-			Sessions:     3,
-			InputTokens:  1000,
-			OutputTokens: 200,
-			TotalTokens:  1200,
-		},
-		Err: errors.New("rate limited"),
-	}
-
-	data, err := json.Marshal(pr)
-	if err != nil {
-		t.Fatalf("failed to marshal ProviderReport: %v", err)
-	}
-
-	var unmarshaled dipstick.ProviderReport
-	if err := json.Unmarshal(data, &unmarshaled); err != nil {
-		t.Fatalf("failed to unmarshal ProviderReport: %v", err)
-	}
-
-	if unmarshaled.ProviderID != pr.ProviderID {
-		t.Errorf("expected provider ID %s, got %s", pr.ProviderID, unmarshaled.ProviderID)
-	}
-	if unmarshaled.Usage.TotalTokens != 1200 {
-		t.Errorf("expected 1200 total tokens, got %d", unmarshaled.Usage.TotalTokens)
-	}
-	if unmarshaled.Err == nil || unmarshaled.Err.Error() != "rate limited" {
-		t.Errorf("expected error 'rate limited', got %v", unmarshaled.Err)
-	}
-
-	// Test without error
-	prNoError := dipstick.ProviderReport{
-		ProviderID: dipstick.ProviderAntigravity,
-	}
-	dataNoError, err := json.Marshal(prNoError)
-	if err != nil {
-		t.Fatalf("failed to marshal ProviderReport: %v", err)
-	}
-	var unmarshaledNoError dipstick.ProviderReport
-	if err := json.Unmarshal(dataNoError, &unmarshaledNoError); err != nil {
-		t.Fatalf("failed to unmarshal ProviderReport: %v", err)
-	}
-	if unmarshaledNoError.Err != nil {
-		t.Errorf("expected nil error, got %v", unmarshaledNoError.Err)
-	}
-}
-
 func TestCollect_SingleProviderCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -210,5 +180,38 @@ func TestCollect_SingleProviderCancelledContext(t *testing.T) {
 	_, err := dipstick.Collect(ctx, dipstick.WithProviders(dipstick.ProviderClaude))
 	if err == nil {
 		t.Fatalf("expected context cancellation error for single provider, got nil")
+	}
+}
+
+// TestCollect_SchemaValidation ties the two halves of this package together:
+// types_test.go proves hand-built reports match dipstick.v1, but nothing
+// otherwise checks that the report Collect actually emits does. That gap is
+// what let the collection path and the schema drift apart in the first place.
+func TestCollect_SchemaValidation(t *testing.T) {
+	schemaPath := filepath.Join("schema", "dipstick.v1.json")
+	compiler := jsonschema.NewCompiler()
+	compiler.Draft = jsonschema.Draft2020
+	schema, err := compiler.Compile(schemaPath)
+	if err != nil {
+		t.Fatalf("failed compiling schema %s: %v", schemaPath, err)
+	}
+
+	report, err := dipstick.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error from Collect: %v", err)
+	}
+
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("failed marshalling report: %v", err)
+	}
+
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		t.Fatalf("failed parsing marshalled report: %v", err)
+	}
+
+	if err := schema.Validate(v); err != nil {
+		t.Errorf("Collect output failed dipstick.v1 validation: %v\nreport: %s", err, data)
 	}
 }
