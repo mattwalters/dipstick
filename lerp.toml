@@ -53,6 +53,7 @@ vendor = "antigravity"
 # source, and it is commented out because a live number would be exactly
 # the confidently wrong denominator that would defeat the point.
 # context = 200000
+args = "--dangerously-skip-permissions"
 # Anything else the adapter doesn't model goes in args, appended after
 # --model/--effort, verbatim and last — so it can override an earlier flag,
 # last-wins like the CLI itself. To step outside the adapter entirely, name a
