@@ -36,23 +36,6 @@ var AllProviders = []ProviderID{
 	ProviderOpenCode,
 }
 
-// SourcePolicy selects which retrieval tiers a collection run is allowed to
-// use. It is an input to Collect and is never serialized into a Report;
-// SourceID below is the output counterpart, naming the tier a datum actually
-// came from.
-type SourcePolicy string
-
-const (
-	// SourcePolicyDefault walks the standard source ladder for each provider.
-	SourcePolicyDefault SourcePolicy = "default"
-	// SourcePolicyLocal restricts collection to local state, config, and caches.
-	SourcePolicyLocal SourcePolicy = "local"
-	// SourcePolicyRemote restricts collection to remote provider APIs.
-	SourcePolicyRemote SourcePolicy = "remote"
-	// SourcePolicyAll gathers from every available source.
-	SourcePolicyAll SourcePolicy = "all"
-)
-
 // SourceID identifies the detection or retrieval tier that produced usage or error data.
 type SourceID string
 
@@ -88,6 +71,39 @@ const (
 	ReasonNotSupported       Reason = "not_supported"
 )
 
+// AttemptStatus represents the outcome of evaluating one source in the ladder.
+type AttemptStatus string
+
+const (
+	// AttemptStatusSuccess indicates the source returned usable data.
+	AttemptStatusSuccess AttemptStatus = "success"
+	// AttemptStatusError indicates the source was attempted but returned an error.
+	AttemptStatusError AttemptStatus = "error"
+	// AttemptStatusUnavailable indicates the source's prerequisites were not met.
+	AttemptStatusUnavailable AttemptStatus = "unavailable"
+	// AttemptStatusSkipped indicates the source was excluded by the source policy.
+	AttemptStatusSkipped AttemptStatus = "skipped"
+	// AttemptStatusTimeout indicates the source exceeded its per-source timeout.
+	AttemptStatusTimeout AttemptStatus = "timeout"
+)
+
+// SourceAttempt records one rung of a ladder walk: which source was tried,
+// how it ended, and how long it took.
+//
+// The trace is diagnostic rather than contractual. dipstick.v1 fixes both
+// provider_report and provider_error with additionalProperties false, so
+// nothing here is serialized into a report; it is reachable in-process by
+// library callers and by `dipstick doctor`, which is what DIP-3 asks of it.
+// Serializing it later is an additive schema change the v1 compatibility
+// promise already permits.
+type SourceAttempt struct {
+	SourceID SourceID
+	Tier     SourceTier
+	Status   AttemptStatus
+	Duration time.Duration
+	Error    string
+}
+
 // Report is the top-level container for a complete usage collection run.
 type Report struct {
 	SchemaVersion string           `json:"schema_version"`
@@ -106,6 +122,13 @@ type ProviderReport struct {
 	Windows    []RateWindow `json:"windows,omitempty"`
 	Tokens     *TokenUsage  `json:"tokens,omitempty"`
 	ObservedAt time.Time    `json:"observed_at"`
+
+	// Tier is the ladder rung Source was drawn from. Not serialized: it is
+	// derivable from Source, and encoding both invites them to disagree.
+	Tier SourceTier `json:"-"`
+	// Attempts is the ladder walk that produced this report, including the
+	// rungs that lost. Not serialized; see SourceAttempt.
+	Attempts []SourceAttempt `json:"-"`
 }
 
 // RateWindow represents a vendor rate limit or quota window (e.g. session, weekly).
@@ -152,6 +175,10 @@ type ProviderError struct {
 	Source    SourceID   `json:"source,omitempty"`
 	Detail    string     `json:"detail"`
 	Retryable bool       `json:"retryable"`
+
+	// Attempts is the exhausted ladder walk behind this failure. Not
+	// serialized; see SourceAttempt.
+	Attempts []SourceAttempt `json:"-"`
 }
 
 // Error implements the standard Go error interface for ProviderError.

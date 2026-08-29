@@ -2,7 +2,6 @@ package dipstick
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -14,9 +13,11 @@ import (
 )
 
 type config struct {
-	providers    []ProviderID
-	timeout      time.Duration
-	sourcePolicy SourcePolicy
+	providers     []ProviderID
+	timeout       time.Duration
+	sourceTimeout time.Duration
+	sourcePolicy  SourcePolicy
+	adapters      map[ProviderID]Adapter
 }
 
 // Option configures the collection run.
@@ -29,10 +30,17 @@ func WithProviders(providers ...ProviderID) Option {
 	}
 }
 
-// WithTimeout sets a timeout for the collection run.
+// WithTimeout sets an overall timeout for the collection run.
 func WithTimeout(d time.Duration) Option {
 	return func(c *config) {
 		c.timeout = d
+	}
+}
+
+// WithSourceTimeout sets a per-source timeout for individual source execution.
+func WithSourceTimeout(d time.Duration) Option {
+	return func(c *config) {
+		c.sourceTimeout = d
 	}
 }
 
@@ -40,6 +48,19 @@ func WithTimeout(d time.Duration) Option {
 func WithSourcePolicy(policy SourcePolicy) Option {
 	return func(c *config) {
 		c.sourcePolicy = policy
+	}
+}
+
+// WithAdapter registers or overrides an adapter implementation for a provider.
+func WithAdapter(adapter Adapter) Option {
+	return func(c *config) {
+		if adapter == nil {
+			return
+		}
+		if c.adapters == nil {
+			c.adapters = make(map[ProviderID]Adapter)
+		}
+		c.adapters[adapter.ID()] = adapter
 	}
 }
 
@@ -53,84 +74,52 @@ func Providers() []ProviderID {
 	return list
 }
 
-type providerWrapper struct {
-	id      ProviderID
-	collect func(ctx context.Context, cfg Config) (ProviderReport, error)
-}
-
-func (pw *providerWrapper) ID() ProviderID {
-	return pw.id
-}
-
-func (pw *providerWrapper) Collect(ctx context.Context, cfg Config) (ProviderReport, error) {
-	return pw.collect(ctx, cfg)
-}
-
-// notCollecting builds a Provider that has no usage surface to read yet and
-// says so as a ProviderError rather than as an empty ProviderReport.
+// defaultAdapter is a provider whose source ladder has not been built yet.
 //
-// This is what the dipstick.v1 contract requires of a stub: every entry in
-// Report.Providers must carry a real source and confidence, naming the tier
-// its numbers actually came from, so a provider with nothing to say cannot
-// appear there honestly. Report.Errors is where it belongs until the
-// source-ladder resolver lands and these adapters start reading anything.
-func notCollecting(id ProviderID, detail string) Provider {
-	return &providerWrapper{
-		id: id,
-		collect: func(ctx context.Context, cfg Config) (ProviderReport, error) {
-			if err := ctx.Err(); err != nil {
-				return ProviderReport{}, err
-			}
-			return ProviderReport{}, ProviderError{
-				Provider:  id,
-				Reason:    ReasonNotSupported,
-				Detail:    detail,
-				Retryable: false,
-			}
-		},
-	}
+// It deliberately declares no sources. A stub source that reported itself
+// available and returned an empty report would land in Report.Providers
+// claiming a source and a confidence — "these numbers came from the vendor's
+// API, exactly" — for numbers nobody collected, which is the one thing the
+// dipstick.v1 contract exists to make unsayable. With an empty ladder the
+// resolver exhausts immediately and the provider is reported as an error,
+// which is true and is what Collect already does today.
+//
+// Each real ladder arrives with its provider's own ticket. Until then the
+// resolver is exercised by the fake adapters in resolver_test.go and by any
+// caller passing WithAdapter.
+type defaultAdapter struct {
+	id ProviderID
 }
 
-var adapterRegistry = map[ProviderID]func() Provider{
-	ProviderAntigravity: func() Provider {
+func (d *defaultAdapter) ID() ProviderID { return d.id }
+
+func (d *defaultAdapter) Detect(ctx context.Context) (Detection, error) {
+	return Detection{}, nil
+}
+
+func (d *defaultAdapter) Sources() []Source { return nil }
+
+var defaultAdapterRegistry = map[ProviderID]func() Adapter{
+	ProviderAntigravity: func() Adapter {
 		_ = antigravity.New()
-		return notCollecting(ProviderAntigravity, "antigravity exposes no usage or quota surface")
+		return &defaultAdapter{id: ProviderAntigravity}
 	},
-	ProviderClaude: func() Provider {
+	ProviderClaude: func() Adapter {
 		_ = claude.New()
-		return notCollecting(ProviderClaude, "claude usage collection is not implemented yet")
+		return &defaultAdapter{id: ProviderClaude}
 	},
-	ProviderCodex: func() Provider {
+	ProviderCodex: func() Adapter {
 		_ = codex.New()
-		return notCollecting(ProviderCodex, "codex usage collection is not implemented yet")
+		return &defaultAdapter{id: ProviderCodex}
 	},
-	ProviderOpenCode: func() Provider {
+	ProviderOpenCode: func() Adapter {
 		_ = opencode.New()
-		return notCollecting(ProviderOpenCode, "opencode usage collection is not implemented yet")
+		return &defaultAdapter{id: ProviderOpenCode}
 	},
 }
 
-// providerErrorFor normalizes an adapter's error into the report's error
-// model. An adapter that classified its own failure keeps that classification;
-// anything else is an uncategorized upstream error, which is the one reason
-// that does not claim to know more than we do.
-func providerErrorFor(id ProviderID, err error) ProviderError {
-	var pe ProviderError
-	if errors.As(err, &pe) {
-		if pe.Provider == "" {
-			pe.Provider = id
-		}
-		return pe
-	}
-	return ProviderError{
-		Provider:  id,
-		Reason:    ReasonUpstreamError,
-		Detail:    err.Error(),
-		Retryable: false,
-	}
-}
-
-// Collect gathers usage reports from configured providers.
+// Collect gathers usage reports from configured providers by walking each
+// adapter's tiered source ladder.
 // Single provider failures are recorded in Report.Errors.
 // Whole-run failures (such as invalid configuration or cancelled context) return an error.
 func Collect(ctx context.Context, opts ...Option) (*Report, error) {
@@ -139,7 +128,9 @@ func Collect(ctx context.Context, opts ...Option) (*Report, error) {
 	}
 
 	cfg := &config{
-		sourcePolicy: SourcePolicyDefault,
+		sourcePolicy:  SourcePolicyDefault,
+		sourceTimeout: 5 * time.Second,
+		adapters:      make(map[ProviderID]Adapter),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -149,6 +140,10 @@ func Collect(ctx context.Context, opts ...Option) (*Report, error) {
 
 	if cfg.timeout < 0 {
 		return nil, fmt.Errorf("invalid timeout: %v", cfg.timeout)
+	}
+
+	if cfg.sourceTimeout < 0 {
+		return nil, fmt.Errorf("invalid source timeout: %v", cfg.sourceTimeout)
 	}
 
 	if cfg.timeout > 0 {
@@ -164,13 +159,26 @@ func Collect(ctx context.Context, opts ...Option) (*Report, error) {
 	targetProviders := cfg.providers
 	if len(targetProviders) == 0 {
 		targetProviders = Providers()
+		// A caller who registered adapters but named no providers means those
+		// adapters, not the built-in roster plus them.
+		if len(cfg.adapters) > 0 {
+			targetProviders = nil
+			for id := range cfg.adapters {
+				targetProviders = append(targetProviders, id)
+			}
+			sort.Slice(targetProviders, func(i, j int) bool {
+				return targetProviders[i] < targetProviders[j]
+			})
+		}
 	}
 
 	seen := make(map[ProviderID]bool)
 	var ordered []ProviderID
 	for _, p := range targetProviders {
-		if _, ok := adapterRegistry[p]; !ok {
-			return nil, fmt.Errorf("unknown provider: %q", p)
+		if _, ok := cfg.adapters[p]; !ok {
+			if _, ok := defaultAdapterRegistry[p]; !ok {
+				return nil, fmt.Errorf("unknown provider: %q", p)
+			}
 		}
 		if !seen[p] {
 			seen[p] = true
@@ -178,48 +186,19 @@ func Collect(ctx context.Context, opts ...Option) (*Report, error) {
 		}
 	}
 
-	// Non-nil so a run that collects nothing marshals "providers": [], which
-	// the schema requires present; a nil slice would encode as null.
-	report := &Report{
-		SchemaVersion: SchemaVersion,
-		GeneratedAt:   time.Now().UTC(),
-		Providers:     make([]ProviderReport, 0, len(ordered)),
+	activeAdapters := make(map[ProviderID]Adapter, len(ordered))
+	for _, p := range ordered {
+		if custom, ok := cfg.adapters[p]; ok {
+			activeAdapters[p] = custom
+		} else {
+			activeAdapters[p] = defaultAdapterRegistry[p]()
+		}
 	}
 
-	providerCfg := Config{
-		SourcePolicy: cfg.sourcePolicy,
-	}
+	resolver := NewResolver(activeAdapters, ResolverConfig{
+		SourcePolicy:  cfg.sourcePolicy,
+		SourceTimeout: cfg.sourceTimeout,
+	})
 
-	for _, id := range ordered {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		factory := adapterRegistry[id]
-		adapter := factory()
-
-		pr, err := adapter.Collect(ctx, providerCfg)
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-
-		if err != nil {
-			report.Errors = append(report.Errors, providerErrorFor(id, err))
-			continue
-		}
-
-		if pr.Provider == "" {
-			pr.Provider = id
-		}
-		if pr.ObservedAt.IsZero() {
-			pr.ObservedAt = report.GeneratedAt
-		}
-		report.Providers = append(report.Providers, pr)
-	}
-
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	return report, nil
+	return resolver.Resolve(ctx, ordered)
 }

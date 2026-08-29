@@ -139,9 +139,17 @@ func TestCollect_NegativeTimeout(t *testing.T) {
 	}
 }
 
+func TestCollect_NegativeSourceTimeout(t *testing.T) {
+	ctx := context.Background()
+	_, err := dipstick.Collect(ctx, dipstick.WithSourceTimeout(-1*time.Second))
+	if err == nil {
+		t.Fatalf("expected error for negative source timeout, got nil")
+	}
+}
+
 func TestCollect_WithTimeout(t *testing.T) {
 	ctx := context.Background()
-	report, err := dipstick.Collect(ctx, dipstick.WithTimeout(5*time.Second))
+	report, err := dipstick.Collect(ctx, dipstick.WithTimeout(5*time.Second), dipstick.WithSourceTimeout(2*time.Second))
 	if err != nil {
 		t.Fatalf("unexpected error with timeout: %v", err)
 	}

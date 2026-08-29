@@ -52,3 +52,33 @@ func TestCLI_NegativeTimeoutError(t *testing.T) {
 		t.Errorf("expected output to contain 'invalid timeout', got %q", string(out))
 	}
 }
+
+func TestCLI_SourceFlags(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "go", "run", ".", "-p", "claude", "--source", "api", "--source-timeout", "1s")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go run failed: %v, output: %s", err, string(out))
+	}
+
+	if !strings.Contains(string(out), `"provider": "claude"`) {
+		t.Errorf("expected json output to name the claude provider, got %q", string(out))
+	}
+}
+
+func TestCLI_NegativeSourceTimeoutError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "go", "run", ".", "-source-timeout", "-5s")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected command failure for negative source timeout, got success. Output: %s", string(out))
+	}
+
+	if !strings.Contains(string(out), "invalid source timeout") {
+		t.Errorf("expected output to contain 'invalid source timeout', got %q", string(out))
+	}
+}
