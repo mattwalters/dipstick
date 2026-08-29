@@ -14,7 +14,11 @@ import (
 	"github.com/mattwalters/dipstick"
 )
 
-var Version = "dev"
+var (
+	Version = "dev"
+	Commit  = "none"
+	Date    = "unknown"
+)
 
 var collectFn = dipstick.Collect
 
@@ -26,7 +30,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 {
 		switch args[0] {
 		case "version":
-			_, _ = fmt.Fprintf(stdout, "dipstick %s\n", Version)
+			_, _ = fmt.Fprintf(stdout, "dipstick %s (commit: %s, built: %s)\n", Version, Commit, Date)
 			return 0
 		case "doctor":
 			return runDoctor(args[1:], stdout, stderr)
@@ -81,7 +85,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if versionFlag || vFlag {
-		_, _ = fmt.Fprintf(stdout, "dipstick %s\n", Version)
+		_, _ = fmt.Fprintf(stdout, "dipstick %s (commit: %s, built: %s)\n", Version, Commit, Date)
 		return 0
 	}
 
@@ -89,7 +93,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if len(remaining) > 0 {
 		switch remaining[0] {
 		case "version":
-			_, _ = fmt.Fprintf(stdout, "dipstick %s\n", Version)
+			_, _ = fmt.Fprintf(stdout, "dipstick %s (commit: %s, built: %s)\n", Version, Commit, Date)
 			return 0
 		case "doctor":
 			return runDoctor(remaining[1:], stdout, stderr)

@@ -1,9 +1,34 @@
 # dipstick
+
 Coding Agent Usage and Metering
 
 ## Supported Platforms
 
 `dipstick` supports macOS and Linux. Windows is out of scope for v0.1.
+
+## Installation
+
+### Pre-built Binaries
+
+Download pre-built binary archives for your platform (`darwin` / `linux` on `amd64` / `arm64`) from the [GitHub Releases](https://github.com/mattwalters/dipstick/releases) page. Extract the archive and place the `dipstick` binary in your `PATH`.
+
+### Using `go install`
+
+Install the latest release directly using `go install`:
+
+```bash
+go install github.com/mattwalters/dipstick/cmd/dipstick@latest
+```
+
+### From Source
+
+Clone the repository and build or install using `make`:
+
+```bash
+git clone https://github.com/mattwalters/dipstick.git
+cd dipstick
+make install
+```
 
 ## Threat Model
 
