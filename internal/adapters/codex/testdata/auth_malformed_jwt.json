@@ -1,0 +1,9 @@
+{
+  "auth_mode": "chatgpt",
+  "tokens": {
+    "id_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.invalid_base64_payload!@#$.ZHVtbXlzaWduYXR1cmVieXRlcw",
+    "access_token": "redacted-access-token",
+    "refresh_token": "redacted-refresh-token",
+    "account_id": "acc-123"
+  }
+}

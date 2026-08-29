@@ -306,11 +306,10 @@ func TestSubprocess_SchemaValidation(t *testing.T) {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
-	// Exit code 1 is expected because built-in stub adapters return no provider data
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		if exitErr.ExitCode() != 1 {
-			t.Fatalf("expected exit code 1 from binary run with stub adapters, got %d. Stderr: %s", exitErr.ExitCode(), stderr.String())
+		if exitErr.ExitCode() != 0 && exitErr.ExitCode() != 1 {
+			t.Fatalf("expected exit code 0 or 1, got %d. Stderr: %s", exitErr.ExitCode(), stderr.String())
 		}
 	} else if err != nil {
 		t.Fatalf("unexpected execution error: %v", err)
