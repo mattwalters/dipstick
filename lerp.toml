@@ -1,0 +1,246 @@
+# lerp.toml — this repository's lerp configuration, written by `lerp init`.
+# Check this file in: it is the pipeline everyone working on this repo runs,
+# and it contains the permissions you grant the agents. Review it like code.
+#
+# This file is the opinion; the engine has none. Lerp does not know that
+# planning comes before implementing: that order exists only in the
+# `on_success` pointers below. Rewrite them into a different shape, or delete
+# queues entirely, and no lerp code changes.
+#
+# Tickets enter by where a human puts them; that placement is the routing
+# decision — there is no syntax for it here.
+# A big feature is promoted into "Planning"; a small fix goes straight
+# to "Implementing".
+
+# Linear team keys this repo serves. One repo may serve several teams (the
+# monorepo case); two repos may never claim the same team.
+teams = ["DIP"]
+
+# Commands that create and destroy a lane's workspace, run from the repo
+# root. Lerp invokes them with a unique lane/run identity and otherwise knows
+# nothing about what they do. Environment isolation — ports, databases,
+# containers — is this repo's problem, solved here.
+provision = 'git worktree add --detach "$LERP_WORKSPACE" HEAD'
+dispose = 'git worktree remove --force "$LERP_WORKSPACE"'
+
+# --------------------------------------------------------------------------
+# Runner
+# --------------------------------------------------------------------------
+
+# The antigravity adapter supplies the invocation: `agy -p {{prompt}}
+# --output-format stream-json --add-dir {{workdir}} --print-timeout 24h`,
+# streaming every event as a JSON line while the run is live so the board's log
+# tail does not stay empty for the whole run — plus `--model`/`--effort` when
+# you set them below. Session tracking is automatic: Antigravity assigns a
+# conversation ID that lerp captures for `eject`. Resume comes from the
+# adapter too: `cd {{workdir}} && agy --conversation {{session}}`.
+#
+# PERMISSIONS: with `--dangerously-skip-permissions`, the agent edits files
+# and runs commands (git, gh, tests) without asking — using your full user
+# account. The worktree that `provision` above builds is a tidiness boundary,
+# not a security one: nothing stops the agent from reading ~/.ssh or writing
+# outside its workspace. Without the flag, a headless run fails at the first
+# tool it is not allowed to use, so the pipeline needs either this grant —
+# made deliberately, in review, where this file lives — or a permissions
+# configuration you curate.
+[runners.antigravity]
+vendor = "antigravity"
+# model = "opus"
+# effort = "high"
+# The model's context window, in tokens, so the board can show how full a
+# run's fullest agent is. No value here means no percentage anywhere on the
+# board — lerp carries no model→window table, so this is the only honest
+# source, and it is commented out because a live number would be exactly
+# the confidently wrong denominator that would defeat the point.
+# context = 200000
+# Anything else the adapter doesn't model goes in args, appended after
+# --model/--effort, verbatim and last — so it can override an earlier flag,
+# last-wins like the CLI itself. To step outside the adapter entirely, name a
+# command instead of a vendor:
+# command = "agy -p {{prompt}} --output-format stream-json --add-dir {{workdir}} --print-timeout 24h"
+# resume = "cd {{workdir}} && agy --conversation {{session}}"
+
+# Each agent needs its own Linear access — lerp passes only the ticket
+# identifier, never the ticket body, and stage artifacts (the plan in the
+# ticket, the pull request, the note a run leaves behind) are written by the
+# agent, not by lerp. Configure the Linear MCP server in Antigravity before
+# expecting these prompts to work. Lerp's own credentials (from `lerp login`
+# or LINEAR_API_KEY) are not a fallback: lerp never passes stored tokens down
+# and drops LINEAR_API_KEY once read, so nothing it starts inherits them. That
+# is hygiene, not containment — a command that reaches a login shell, and a
+# session you resume yourself with the command above, both pick an exported
+# key back up from wherever you exported it; that leak is not a supported
+# access path.
+
+# --------------------------------------------------------------------------
+# Queues
+# --------------------------------------------------------------------------
+#
+# Prompts are plain text: read them, argue with them, edit them. Each one
+# names its ticket with {{ticket}}, tells the agent where durable decisions
+# belong (Linear), and says how to escalate (move the ticket itself — lerp
+# will not overrule an agent that moved its own ticket). A prompt may also
+# reference its own queue's {{status}}, {{on_success}}, and {{on_failure}},
+# expanded at run time — so the prose follows the configured statuses
+# through any rename or remap.
+
+[queues.plan]
+status = "Planning"
+runner = "antigravity"
+on_success = "Plan Review"
+on_failure = "Needs Attention"
+prompt = """
+You are planning {{ticket}}, nothing more. Do not write code.
+
+Read {{ticket}} in Linear, read SCOPE.md and AGENTS.md if this repository has
+them, and explore enough of the code to know what the change touches.
+
+Write the plan into the ticket's own description, not into a comment: a
+`## Plan` heading, then what you will change, which files, and how you will
+know it worked. Open the section with a 2–4 sentence summary — what changes,
+roughly where, and the one risk or open question worth knowing — that a
+reviewer can approve or reject on before reading the detail below it. Leave
+everything above that heading alone — it is what a human asked for. If the
+description already has a `## Plan` section, replace that section and
+nothing else. The description is the first thing the board shows, so the
+plan reads as the ticket rather than as something filed under it, and
+whoever meets it at "{{on_success}}" can edit it before promoting.
+
+If the ticket is too vague to plan, or big enough that it should be several
+tickets, say so in a comment and move {{ticket}} to {{on_failure}} instead of
+guessing.
+"""
+
+[queues.implement]
+status = "Implementing"
+runner = "antigravity"
+on_success = "In Review"
+on_failure = "Needs Attention"
+prompt = """
+Implement {{ticket}}. This run ends one of exactly two ways, and it is not
+finished until it reaches one of them: a verdict comment on {{ticket}} and
+the pull request marked ready for review, or {{ticket}} moved to
+{{on_failure}} with a comment saying what stopped you, having never marked
+the pull request ready. Nothing checks this for you: running out of prompt
+with the pull request still a draft and {{ticket}} where it started leaves
+it resting in "{{on_success}}" looking finished when it is not. Everything
+below is how to get to one of those two endings.
+
+Establish the brief first — the first of these that exists is the brief, and
+the rest are not:
+
+1. Unresolved review threads on the pull request for {{ticket}} that no later
+   commit has answered, a human's before an agent's. Address exactly what
+   they raise and nothing else, and reply to each thread saying what you did.
+2. The newest comment on {{ticket}} asking for changes, if nothing since has
+   answered it.
+3. The ticket's description — its `## Plan` section if it has one, otherwise
+   the whole of it.
+
+All three are real entry paths: a small fix routed straight here never had a
+plan, and a ticket sent back to this queue has something to answer. Work
+whose pull request already carries the commits answering it has been answered
+already; the brief is then whatever sent {{ticket}} back this time.
+
+A pull request for {{ticket}} may already exist; look with `gh`. If one does,
+this is rework: add commits to its branch rather than starting again, and
+never open a second pull request for the same ticket.
+
+Your workspace is a fresh worktree sharing the operator's git directory,
+detached at whatever their clone had checked out — so treat nothing already
+in it as your base. Fetch from the remote and check out the ref you want,
+detached: `git checkout <branch>` by name fails outright when another
+worktree holds that branch, which is the ordinary case for a ticket a human
+has just been reading. Push with `git push origin HEAD:<branch>`.
+
+Make the tests and whatever this repository uses as its check pass before you
+push. If there is no pull request yet, open one as a draft
+(`gh pr create --draft`). It stays a draft until the work is ready for a
+human — which also keeps a pull-request automation on your Linear team from
+moving {{ticket}} out from under this run while you are still working.
+
+Title the pull request you open with {{ticket}}, a colon, and a short
+description of the change. A pull request's number and its ticket's
+identifier are unrelated numbers, and GitHub's pull request list, its
+notifications and its review requests name a pull request by its number and
+its title — so the title is where the identifier has to be.
+
+Now review what you built, before a human has to. Read the diff with fresh
+eyes: hand it to the reviewer agent if your runner provides one, or any
+subagent that gets the brief and the diff and none of your reasoning;
+otherwise read it back yourself. Check it against the brief and against this
+repository's own conventions, and rate what you find high, medium or low.
+Concrete failure scenarios only — no style essays.
+
+Post the findings on the pull request, as review comments on the lines they
+concern — every severity, Low included. Each review round ends with one
+`gh pr review --comment` on the pull request stating the round number, the
+review mechanism (the named reviewer agent or subagent, or self-read-back),
+and the findings count by severity — including an explicit "0 findings" for a
+clean round. Then fix them, push, and answer each thread. Review the result
+again. Stop when a round turns up nothing high or medium, or after three
+rounds — whichever comes first. A round that finds nothing is a good round;
+do not invent work to justify one.
+
+If three rounds leave something high or medium standing, this stops being
+yours: leave the pull request as it stands and do not mark it ready, comment
+on {{ticket}} with what is still wrong and what you tried, and move it to
+{{on_failure}}.
+
+When the work is ready for a human, leave one short comment on {{ticket}}
+first: what changed, anything you know is still weak, and the pull request's
+link.
+Say in it how the review went, too — how many rounds you ran, what the last
+one found, and how the review was done — name the reviewer agent or subagent
+you handed the diff to, or say you read it back yourself. That is what makes
+it a verdict rather than a summary; without it the comment reads exactly the
+same whether you reviewed or not, and it is the only artifact Linear gets
+showing the review happened. The findings themselves live on the pull
+request.
+Only then mark the pull request ready for review (`gh pr ready`). That order
+matters: the ready-flip is what lets a pull-request automation on your Linear
+team move {{ticket}}, so the comment has to already be on it when that
+happens. That comment is the verdict comment, and it is the whole of what
+Linear gets — the pull request is the artifact, so never paste diffs or
+transcripts into a ticket.
+
+The board reads a ticket's comments into the main pane, so a ticket resting
+in "{{on_success}}" with no verdict on it reads as unfinished at a glance,
+without anyone opening the pull request to find out. Leaving one is not
+optional.
+
+If the brief turns out to be wrong or missing, move {{ticket}} to
+{{on_failure}} and say why in a comment rather than inventing your own.
+"""
+
+# A status no queue watches is how this pipeline waits for a human: the
+# ticket comes to rest there and shows up in the inbox — named by the status
+# it is resting in. The run releases its claim on the way out, because the
+# status is the gate; a claim left here would only strand the ticket the
+# moment anyone moved it on.
+#
+# "Plan Review" is the first such gate. A plan is worth writing only if
+# someone reads it, so a finished plan stops here instead of flowing straight
+# into "Implementing". The plan is the ticket's description, so it is the
+# first thing the board shows you: edit it where you disagree, then press `p` to
+# promote the ticket — to "Implementing" to build it, back to
+# "Planning" to re-plan, or to "Needs Attention" to let it sit. That
+# promote is the approval. Work that needs no plan never enters "Planning"
+# and never meets this gate — routing is placement.
+#
+# "In Review" is where work leaves the automated path: a ticket that
+# lands there on success waits for a human to merge the pull request — and
+# Linear's GitHub integration moves it to Done.
+#
+# "Needs Attention" is the same idea for failures: no queue watches it,
+# so a ticket that lands there waits for you rather than being retried
+# forever.
+#
+# There is deliberately no queue for reviewing. Review is iteration, and
+# iteration is not a decision — a review that ping-pongs across the board
+# leaves a trail of hops nobody read, and nothing on a board can count them.
+# So "Implementing" reviews and fixes its own work inside one run,
+# where the round count is the agent's own context and costs the board
+# nothing. What reaches "Needs Attention" is only what three rounds could
+# not settle: say what you want on the pull request, promote the ticket back
+# to "Implementing", and the next run reads your threads as its brief.
