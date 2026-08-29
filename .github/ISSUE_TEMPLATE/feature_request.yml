@@ -1,0 +1,26 @@
+name: Feature / Adapter Request
+description: Propose support for a new AI coding agent provider or source tier
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea for a new provider adapter or capability in Dipstick? Let us know!
+  - type: textarea
+    id: summary
+    attributes:
+      label: Feature / Provider Summary
+      description: Which AI coding agent, source tier, or feature would you like to see supported?
+    validations:
+      required: true
+  - type: textarea
+    id: usage_surface
+    attributes:
+      label: Vendor Usage Surface Details
+      description: Does this vendor have a CLI, local SQLite/JSON state store, local RPC server, or public API? Please link any documentation or research.
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution / Source Ladder
+      description: How should Dipstick resolve metrics for this provider?
