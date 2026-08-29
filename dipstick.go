@@ -9,7 +9,6 @@ import (
 	"github.com/mattwalters/dipstick/internal/adapters/antigravity"
 	"github.com/mattwalters/dipstick/internal/adapters/claude"
 	"github.com/mattwalters/dipstick/internal/adapters/codex"
-	"github.com/mattwalters/dipstick/internal/adapters/opencode"
 )
 
 // DefaultTimeout is the default execution timeout for a collection run.
@@ -122,8 +121,7 @@ var defaultAdapterRegistry = map[ProviderID]func() Adapter{
 		return codex.New()
 	},
 	ProviderOpenCode: func() Adapter {
-		_ = opencode.New()
-		return &defaultAdapter{id: ProviderOpenCode}
+		return newOpenCodeAdapter()
 	},
 }
 
