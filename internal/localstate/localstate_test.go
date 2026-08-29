@@ -580,6 +580,45 @@ func TestResolver_ReadClaudeCredentials_KeychainExpiredFallbackToDisk(t *testing
 	}
 }
 
+func TestResolver_ReadClaudeCredentials_KeychainExpiredNoDisk(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+
+	// Keychain has an expired credential and no disk file exists
+	keychainPayload := fmt.Sprintf(`{
+		"claudeAiOauth": {
+			"accessToken": "sk-ant-expired-keychain-only",
+			"refreshToken": "refresh-expired-keychain",
+			"expiresAt": %d,
+			"account": {
+				"uuid": "acc-keychain-expired"
+			}
+		}
+	}`, now.Add(-1*time.Hour).UnixMilli())
+
+	mockKM := &mockKeychainReader{
+		passwords: map[string][]byte{
+			localstate.ClaudeCredentialService: []byte(keychainPayload),
+		},
+	}
+
+	r := localstate.New(
+		localstate.WithHomeDir(tmpDir),
+		localstate.WithKeychain(mockKM),
+		localstate.WithNow(func() time.Time { return now }),
+	)
+
+	creds, err := r.ReadClaudeCredentials(ctx)
+	if !errors.Is(err, localstate.ErrCredentialExpired) {
+		t.Fatalf("expected ErrCredentialExpired, got %v", err)
+	}
+
+	if creds == nil || creds.AccessToken != "sk-ant-expired-keychain-only" {
+		t.Errorf("expected parsed keychain creds returned with error, got %v", creds)
+	}
+}
+
 func TestResolver_ReadCodexAuth(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

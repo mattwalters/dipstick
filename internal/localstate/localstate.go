@@ -370,6 +370,7 @@ func (r *Resolver) ProviderConfigDir(provider string) (string, error) {
 // falling back to reading the disk-based .credentials.json file.
 func (r *Resolver) ReadClaudeCredentials(ctx context.Context) (*ClaudeCredentials, error) {
 	var keychainErr error
+	var keychainCreds *ClaudeCredentials
 	if r.keychain != nil {
 		data, err := r.keychain.GetGenericPassword(ctx, ClaudeCredentialService, "")
 		if err == nil && len(data) > 0 {
@@ -378,6 +379,7 @@ func (r *Resolver) ReadClaudeCredentials(ctx context.Context) (*ClaudeCredential
 				return creds, nil
 			}
 			keychainErr = parseErr
+			keychainCreds = creds
 		}
 	}
 
@@ -390,7 +392,7 @@ func (r *Resolver) ReadClaudeCredentials(ctx context.Context) (*ClaudeCredential
 	if err != nil {
 		if os.IsNotExist(err) {
 			if keychainErr != nil {
-				return nil, keychainErr
+				return keychainCreds, keychainErr
 			}
 			return nil, ErrCredentialNotFound
 		}
