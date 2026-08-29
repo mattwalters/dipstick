@@ -1,0 +1,65 @@
+name: Vendor Drift / Schema Changed
+description: Report a vendor CLI update, schema change, or upstream API breakage
+title: "[Vendor Drift]: <Provider> <Version> changed usage/auth surface"
+labels: ["vendor-drift", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting vendor drift! Because AI coding agent vendors update CLI outputs and state structures frequently, diagnostic output is crucial for updating Dipstick adapters.
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Affected Provider
+      description: Which AI coding agent provider changed?
+      options:
+        - Claude Code (Anthropic)
+        - OpenAI Codex
+        - OpenCode (anomalyco)
+        - Google Antigravity
+        - Other (specify below)
+    validations:
+      required: true
+  - type: input
+    id: vendor_version
+    attributes:
+      label: Vendor CLI / App Version
+      description: What version of the vendor tool is currently installed? (e.g., `opencode --version` or `claude --version`)
+      placeholder: "e.g. v1.19.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System & Architecture
+      description: Which operating system and CPU architecture are you running?
+      options:
+        - macOS (Apple Silicon arm64)
+        - macOS (Intel x86_64)
+        - Linux (x86_64)
+        - Linux (arm64)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostic_output
+    attributes:
+      label: Diagnostic JSON Output
+      description: Please run `dipstick doctor --json` or `dipstick -p <provider> --json` and paste the full JSON output here.
+      placeholder: |
+        ```json
+        {
+          "schema_version": "dipstick.v1",
+          ...
+        }
+        ```
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description of Drift / Observed Behavior
+      description: Describe what changed in the vendor's tool (e.g. new command line flags, changed SQLite database schema, modified auth tokens, new rate limit headers).
+    validations:
+      required: true
