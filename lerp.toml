@@ -214,6 +214,11 @@ If the brief turns out to be wrong or missing, move {{ticket}} to
 {{on_failure}} and say why in a comment rather than inventing your own.
 """
 
+# Merging here is a squash: one commit on main per pull request, titled from
+# the pull request. That makes the implement queue's rule about putting the
+# ticket identifier in the title load-bearing rather than tidy — the title
+# becomes the permanent subject line on main.
+#
 # The gate at "In Review" used to bundle two things: the decision (this should
 # land) and the mechanics (rebase, watch CI, resolve conflicts, click merge).
 # The decision belongs on the board and stays there — a human reads the pull
@@ -318,14 +323,15 @@ either, and what both mistakes throw away is whatever arrived while you were
 rebasing — most likely a review fix a human pushed, which is the one thing
 this queue must not lose.
 
-Then merge, by number and by method: `gh pr merge <number> --merge`. The
+Then merge, by number and by method: `gh pr merge <number> --squash`. The
 number, because a detached HEAD gives `gh` no branch to infer it from; the
-method, because this repository allows all three and `gh` will not pick one
-for you outside a terminal. A merge commit is what this history is made of —
-every pull request so far has landed as one, each keeping its own commits
-underneath — so `--squash` here would quietly change that convention one
-merge at a time, and `--rebase` would drop the merge commits the log is
-navigated by. Merge only once the pull request's own checks are green
+method, because `gh` will not pick one for you outside a terminal even where
+only one is enabled. Squash is this repository's convention: one commit on
+main per pull request, taking the pull request's own title — which is why the
+implement queue insists that title carry the ticket identifier, since here it
+becomes the permanent subject line on main. The merge commits earlier in this
+history predate that decision and are not a pattern to match. Merge only once
+the pull request's own checks are green
 against the head you just pushed: your local check says the code is fine,
 these say that what lands on main is. They will still be running when you
 get there, so watch them with `gh pr checks <number> --watch` — by number
