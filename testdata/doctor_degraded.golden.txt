@@ -1,0 +1,5 @@
+codex    0.148.0  ⚠ newer than verified (>=0.140 <0.145)
+  ✗ tier 1  usage-api        not_authenticated — auth_mode is API key
+  ✓ tier 2  auth-json        ok (identity only)
+  · tier 3  app-server       skipped — higher tier succeeded
+  → Next step: run `codex auth login`

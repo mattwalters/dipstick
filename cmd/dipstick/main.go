@@ -20,7 +20,10 @@ var (
 	Date    = "unknown"
 )
 
-var collectFn = dipstick.Collect
+var (
+	collectFn = dipstick.Collect
+	doctorFn  = dipstick.Doctor
+)
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -43,6 +46,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var (
 		prettyFlag     bool
 		jsonFlag       bool
+		doctorFlag     bool
 		providerFlag   string
 		providersFlag  string
 		pFlag          string
@@ -58,6 +62,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	fs.BoolVar(&prettyFlag, "pretty", false, "Output pretty styled report to stdout")
 	fs.BoolVar(&jsonFlag, "json", false, "Output dipstick.v1 report to stdout as JSON")
+	fs.BoolVar(&doctorFlag, "doctor", false, "Diagnose provider installations and source ladders")
 	fs.StringVar(&providerFlag, "provider", "", "Comma-separated list of providers to collect (alias for --providers)")
 	fs.StringVar(&providersFlag, "providers", "", "Comma-separated list of providers to collect (default: all)")
 	fs.StringVar(&pFlag, "p", "", "Comma-separated list of providers to collect (shorthand)")
@@ -94,6 +99,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if versionFlag || vFlag {
 		_, _ = fmt.Fprintf(stdout, "dipstick %s (commit: %s, built: %s)\n", Version, Commit, Date)
 		return 0
+	}
+
+	if doctorFlag {
+		return runDoctor(fs.Args(), stdout, stderr)
 	}
 
 	remaining := fs.Args()
@@ -193,6 +202,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	} else {
 		enc := json.NewEncoder(stdout)
+		enc.SetEscapeHTML(false)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
 			_, _ = fmt.Fprintf(stderr, "error encoding report: %v\n", err)
@@ -208,6 +218,134 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func runDoctor(args []string, stdout, stderr io.Writer) int {
-	_, _ = fmt.Fprintf(stderr, "dipstick doctor is not yet implemented\n")
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var (
+		jsonFlag       bool
+		providerFlag   string
+		providersFlag  string
+		pFlag          string
+		policyFlag     string
+		sourceFlag     string
+		strictFlag     bool
+		timeoutFlag    time.Duration = dipstick.DefaultTimeout
+		sourceTimeout1 time.Duration
+		sourceTimeout2 time.Duration
+	)
+
+	fs.BoolVar(&jsonFlag, "json", false, "Output doctor report to stdout as JSON")
+	fs.StringVar(&providerFlag, "provider", "", "Comma-separated list of providers to diagnose (alias for --providers)")
+	fs.StringVar(&providersFlag, "providers", "", "Comma-separated list of providers to diagnose (default: all)")
+	fs.StringVar(&pFlag, "p", "", "Comma-separated list of providers to diagnose (shorthand)")
+	fs.StringVar(&policyFlag, "policy", "", "Source policy: default, local, remote, api, cli, all")
+	fs.StringVar(&sourceFlag, "source", "", "Source policy / tier pin (alias for --policy)")
+	fs.BoolVar(&strictFlag, "strict", false, "Treat drift warnings as failures")
+	fs.DurationVar(&timeoutFlag, "timeout", dipstick.DefaultTimeout, "Overall timeout for doctor run")
+	fs.DurationVar(&sourceTimeout1, "source-timeout", 0, "Per-source timeout for ladder resolution")
+	fs.DurationVar(&sourceTimeout2, "st", 0, "Per-source timeout for ladder resolution (shorthand)")
+
+	fs.Usage = func() {
+		_, _ = fmt.Fprintf(stderr, "Usage: dipstick doctor [options]\n\n")
+		_, _ = fmt.Fprintf(stderr, "Diagnose provider installations and source ladders.\n\n")
+		_, _ = fmt.Fprintf(stderr, "Options:\n")
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+
+	remaining := fs.Args()
+	if len(remaining) > 0 {
+		_, _ = fmt.Fprintf(stderr, "error: unexpected argument %q\n", remaining[0])
+		return 2
+	}
+
+	if timeoutFlag < 0 {
+		_, _ = fmt.Fprintf(stderr, "error: invalid timeout: %v\n", timeoutFlag)
+		return 2
+	}
+
+	sourceTimeout := sourceTimeout1
+	if sourceTimeout2 != 0 {
+		sourceTimeout = sourceTimeout2
+	}
+	if sourceTimeout < 0 {
+		_, _ = fmt.Fprintf(stderr, "error: invalid source timeout: %v\n", sourceTimeout)
+		return 2
+	}
+
+	var opts []dipstick.Option
+
+	var rawProviders []string
+	for _, p := range []string{providerFlag, providersFlag, pFlag} {
+		if p != "" {
+			rawProviders = append(rawProviders, p)
+		}
+	}
+
+	if len(rawProviders) > 0 {
+		var providers []dipstick.ProviderID
+		for _, raw := range rawProviders {
+			parts := strings.Split(raw, ",")
+			for _, part := range parts {
+				trimmed := strings.TrimSpace(part)
+				if trimmed != "" {
+					providers = append(providers, dipstick.ProviderID(trimmed))
+				}
+			}
+		}
+		if len(providers) > 0 {
+			opts = append(opts, dipstick.WithProviders(providers...))
+		}
+	}
+
+	if timeoutFlag != 0 {
+		opts = append(opts, dipstick.WithTimeout(timeoutFlag))
+	}
+
+	if sourceTimeout != 0 {
+		opts = append(opts, dipstick.WithSourceTimeout(sourceTimeout))
+	}
+
+	activePolicy := policyFlag
+	if sourceFlag != "" {
+		activePolicy = sourceFlag
+	}
+	if activePolicy != "" {
+		opts = append(opts, dipstick.WithSourcePolicy(dipstick.SourcePolicy(activePolicy)))
+	}
+
+	if strictFlag {
+		opts = append(opts, dipstick.WithStrict(true))
+	}
+
+	ctx := context.Background()
+	report, err := doctorFn(ctx, opts...)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+
+	if jsonFlag {
+		enc := json.NewEncoder(stdout)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			_, _ = fmt.Fprintf(stderr, "error encoding doctor report: %v\n", err)
+			return 2
+		}
+		return 0
+	}
+
+	if err := report.RenderText(stdout); err != nil {
+		_, _ = fmt.Fprintf(stderr, "error rendering doctor report: %v\n", err)
+		return 2
+	}
+
 	return 0
 }

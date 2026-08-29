@@ -1,0 +1,20 @@
+{
+  "schema_version": "dipstick.v1",
+  "generated_at": "2026-08-29T12:00:00Z",
+  "providers": [
+    {
+      "provider": "antigravity",
+      "installed": false,
+      "compat_verdict": "not_installed",
+      "config_dir": {
+        "path": "/Users/user/.gemini/antigravity-cli",
+        "overridden": false
+      },
+      "auth": {
+        "found": false,
+        "type": "none",
+        "detail": "no credentials found"
+      }
+    }
+  ]
+}

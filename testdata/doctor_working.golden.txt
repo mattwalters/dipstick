@@ -1,0 +1,3 @@
+claude   2.1.246  ✓ verified range
+  ✓ tier 1  oauth-api        ok (session 68%, weekly 31%)
+  · tier 4  transcripts      skipped — higher tier succeeded
