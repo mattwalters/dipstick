@@ -182,6 +182,24 @@ func TestCollect_WithSourcePolicy(t *testing.T) {
 	}
 }
 
+func TestCollect_WithStrict(t *testing.T) {
+	ctx := context.Background()
+	report, err := dipstick.Collect(ctx, dipstick.WithStrict(true))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if report == nil {
+		t.Fatal("expected non-nil report")
+		return
+	}
+}
+
+func TestDefaultTimeout(t *testing.T) {
+	if dipstick.DefaultTimeout != 30*time.Second {
+		t.Errorf("expected DefaultTimeout to be 30s, got %v", dipstick.DefaultTimeout)
+	}
+}
+
 func TestCollect_SingleProviderCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

@@ -12,11 +12,15 @@ import (
 	"github.com/mattwalters/dipstick/internal/adapters/opencode"
 )
 
+// DefaultTimeout is the default execution timeout for a collection run.
+const DefaultTimeout = 30 * time.Second
+
 type config struct {
 	providers     []ProviderID
 	timeout       time.Duration
 	sourceTimeout time.Duration
 	sourcePolicy  SourcePolicy
+	strict        bool
 	adapters      map[ProviderID]Adapter
 }
 
@@ -48,6 +52,13 @@ func WithSourceTimeout(d time.Duration) Option {
 func WithSourcePolicy(policy SourcePolicy) Option {
 	return func(c *config) {
 		c.sourcePolicy = policy
+	}
+}
+
+// WithStrict toggles strict mode: when enabled, drift warnings are treated as failures.
+func WithStrict(strict bool) Option {
+	return func(c *config) {
+		c.strict = strict
 	}
 }
 
@@ -198,6 +209,7 @@ func Collect(ctx context.Context, opts ...Option) (*Report, error) {
 	resolver := NewResolver(activeAdapters, ResolverConfig{
 		SourcePolicy:  cfg.sourcePolicy,
 		SourceTimeout: cfg.sourceTimeout,
+		Strict:        cfg.strict,
 	})
 
 	return resolver.Resolve(ctx, ordered)
