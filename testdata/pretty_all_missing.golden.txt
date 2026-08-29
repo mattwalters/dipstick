@@ -1,0 +1,4 @@
+ claude       session  — usage unavailable
+ codex        weekly   — usage unavailable
+ antigravity  —        antigravity exposes no usage or quota surface (not_supported)
+ opencode     —        opencode connection failed (upstream_error)

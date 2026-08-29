@@ -475,4 +475,26 @@ func TestSubprocess_ExitCodes(t *testing.T) {
 			t.Errorf("expected version output %q, got %q", expected, string(out))
 		}
 	})
+
+	t.Run("exit code 1 on pretty empty/failed providers", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, testBinaryPath, "--pretty")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Fatalf("expected ExitError, got %v", err)
+		}
+		if exitErr.ExitCode() != 1 {
+			t.Errorf("expected exit code 1, got %d", exitErr.ExitCode())
+		}
+		if !strings.Contains(stdout.String(), "claude") {
+			t.Errorf("expected stdout to contain provider names in pretty format, got %s", stdout.String())
+		}
+	})
 }
