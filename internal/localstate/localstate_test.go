@@ -516,6 +516,70 @@ func TestResolver_ReadClaudeCredentials_DiskFallback(t *testing.T) {
 	}
 }
 
+func TestResolver_ReadClaudeCredentials_KeychainExpiredFallbackToDisk(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+
+	// Disk has a valid, unexpired credential
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	diskPayload := fmt.Sprintf(`{
+		"claudeAiOauth": {
+			"accessToken": "sk-ant-fresh-disk-token",
+			"refreshToken": "refresh-fresh-disk",
+			"expiresAt": %d,
+			"account": {
+				"uuid": "acc-disk-valid"
+			}
+		}
+	}`, now.Add(24*time.Hour).UnixMilli())
+
+	credsFile := filepath.Join(claudeDir, ".credentials.json")
+	if err := os.WriteFile(credsFile, []byte(diskPayload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Keychain has an expired credential
+	keychainPayload := fmt.Sprintf(`{
+		"claudeAiOauth": {
+			"accessToken": "sk-ant-expired-keychain-token",
+			"refreshToken": "refresh-expired-keychain",
+			"expiresAt": %d,
+			"account": {
+				"uuid": "acc-keychain-expired"
+			}
+		}
+	}`, now.Add(-1*time.Hour).UnixMilli())
+
+	mockKM := &mockKeychainReader{
+		passwords: map[string][]byte{
+			localstate.ClaudeCredentialService: []byte(keychainPayload),
+		},
+	}
+
+	r := localstate.New(
+		localstate.WithHomeDir(tmpDir),
+		localstate.WithKeychain(mockKM),
+		localstate.WithNow(func() time.Time { return now }),
+	)
+
+	creds, err := r.ReadClaudeCredentials(ctx)
+	if err != nil {
+		t.Fatalf("ReadClaudeCredentials failed: %v", err)
+	}
+
+	if creds.AccessToken != "sk-ant-fresh-disk-token" {
+		t.Errorf("expected fresh token from disk fallback, got %s", creds.AccessToken)
+	}
+	if creds.AccountID != "acc-disk-valid" {
+		t.Errorf("expected account ID acc-disk-valid, got %s", creds.AccountID)
+	}
+}
+
 func TestResolver_ReadCodexAuth(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

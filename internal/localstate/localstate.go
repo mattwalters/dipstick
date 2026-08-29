@@ -369,10 +369,15 @@ func (r *Resolver) ProviderConfigDir(provider string) (string, error) {
 // ReadClaudeCredentials attempts to read Claude credentials from macOS Keychain first,
 // falling back to reading the disk-based .credentials.json file.
 func (r *Resolver) ReadClaudeCredentials(ctx context.Context) (*ClaudeCredentials, error) {
+	var keychainErr error
 	if r.keychain != nil {
 		data, err := r.keychain.GetGenericPassword(ctx, ClaudeCredentialService, "")
 		if err == nil && len(data) > 0 {
-			return ParseClaudeCredentials(data, r.now())
+			creds, parseErr := ParseClaudeCredentials(data, r.now())
+			if parseErr == nil {
+				return creds, nil
+			}
+			keychainErr = parseErr
 		}
 	}
 
@@ -384,6 +389,9 @@ func (r *Resolver) ReadClaudeCredentials(ctx context.Context) (*ClaudeCredential
 	data, err := os.ReadFile(paths.CredentialsFile)
 	if err != nil {
 		if os.IsNotExist(err) {
+			if keychainErr != nil {
+				return nil, keychainErr
+			}
 			return nil, ErrCredentialNotFound
 		}
 		return nil, fmt.Errorf("reading claude credentials file: %w", err)
