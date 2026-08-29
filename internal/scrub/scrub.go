@@ -34,11 +34,11 @@ var (
 
 	// paramCredsQuoted matches quoted key-value pairs in JSON, YAML, configs, CLI flags:
 	// "token": "secret", 'password': 'secret', --token="secret"
-	paramCredsQuoted = regexp.MustCompile(`(?i)(["']?)\b(password|access_token|refresh_token|auth_token|api_key|apikey|client_secret|client_key|secret_key|private_key|token|secret|key)\b(["']?)(\s*[:=]\s*)(["'])([^"'\r\n]+)(["'])`)
+	paramCredsQuoted = regexp.MustCompile(`(?i)(^|[\s?&,;])(--)?(["']?)(password|access_token|refresh_token|auth_token|api_key|apikey|client_secret|client_key|secret_key|private_key|token|secret|key)(["']?)(\s*[:=]\s*)(["'])([^"'\r\n]+)(["'])`)
 
 	// paramCredsUnquoted matches unquoted key-value pairs in URL query strings, CLI flags, plain text:
 	// token=secret, password=secret, key=secret
-	paramCredsUnquoted = regexp.MustCompile(`(?i)(["']?)\b(password|access_token|refresh_token|auth_token|api_key|apikey|client_secret|client_key|secret_key|private_key|token|secret|key)\b(["']?)(\s*[:=]\s*)([^\s,"';&]+)`)
+	paramCredsUnquoted = regexp.MustCompile(`(?i)(^|[\s?&,;])(--)?(["']?)(password|access_token|refresh_token|auth_token|api_key|apikey|client_secret|client_key|secret_key|private_key|token|secret|key)(["']?)(\s*[:=]\s*)([^\s,"';&]+)`)
 )
 
 // Redacted is the replacement string used for scrubbed sensitive data.
@@ -78,12 +78,12 @@ func Scrub(s string) string {
 	// 6. Scrub quoted key-value parameters
 	res = paramCredsQuoted.ReplaceAllStringFunc(res, func(match string) string {
 		submatches := paramCredsQuoted.FindStringSubmatch(match)
-		if len(submatches) >= 8 {
-			val := submatches[6]
+		if len(submatches) >= 10 {
+			val := submatches[8]
 			if val == Redacted || strings.Contains(val, Redacted) {
 				return match
 			}
-			return submatches[1] + submatches[2] + submatches[3] + submatches[4] + submatches[5] + Redacted + submatches[7]
+			return submatches[1] + submatches[2] + submatches[3] + submatches[4] + submatches[5] + submatches[6] + submatches[7] + Redacted + submatches[9]
 		}
 		return match
 	})
@@ -91,12 +91,12 @@ func Scrub(s string) string {
 	// 7. Scrub unquoted key-value parameters
 	res = paramCredsUnquoted.ReplaceAllStringFunc(res, func(match string) string {
 		submatches := paramCredsUnquoted.FindStringSubmatch(match)
-		if len(submatches) >= 6 {
-			val := submatches[5]
+		if len(submatches) >= 8 {
+			val := submatches[7]
 			if val == Redacted || strings.Contains(val, Redacted) {
 				return match
 			}
-			return submatches[1] + submatches[2] + submatches[3] + submatches[4] + Redacted
+			return submatches[1] + submatches[2] + submatches[3] + submatches[4] + submatches[5] + submatches[6] + Redacted
 		}
 		return match
 	})

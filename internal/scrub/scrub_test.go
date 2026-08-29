@@ -198,6 +198,9 @@ func TestScrub_NonSensitiveStringsPreserved(t *testing.T) {
 		"executable not found in PATH",
 		"unexpected response payload at byte 42",
 		"source fetch timeout",
+		"--sort-key=name",
+		"turn-key=auto",
+		"public-key=allowed",
 	}
 
 	for _, s := range nonSensitive {
