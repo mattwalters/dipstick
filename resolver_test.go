@@ -3,6 +3,8 @@ package dipstick_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -854,5 +856,133 @@ func TestCollect_WithCustomAdapter(t *testing.T) {
 	}
 	if pr.Source != dipstick.SourceLocalState {
 		t.Errorf("expected source %s, got %s", dipstick.SourceLocalState, pr.Source)
+	}
+}
+
+func TestResolver_ReasonPropagation(t *testing.T) {
+	t.Run("drift alarm ReasonParseFailed propagation", func(t *testing.T) {
+		// Tier 1 fails with ErrParseFailed (drift signal)
+		tier1 := &fakeSource{
+			id:        dipstick.SourceOAuthAPI,
+			tier:      dipstick.TierAPI,
+			available: true,
+			fetchErr:  fmt.Errorf("json unmarshal failed: %w", dipstick.ErrParseFailed),
+		}
+		// Tier 2 fails with generic error
+		tier2 := &fakeSource{
+			id:        dipstick.SourceLocalState,
+			tier:      dipstick.TierLocalState,
+			available: true,
+			fetchErr:  errors.New("500 internal server error"),
+		}
+
+		adapter := &fakeAdapter{
+			id:      dipstick.ProviderClaude,
+			sources: []dipstick.Source{tier1, tier2},
+		}
+
+		resolver := dipstick.NewResolver(map[dipstick.ProviderID]dipstick.Adapter{
+			dipstick.ProviderClaude: adapter,
+		}, dipstick.ResolverConfig{})
+
+		report, err := resolver.Resolve(context.Background(), []dipstick.ProviderID{dipstick.ProviderClaude})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(report.Errors) != 1 {
+			t.Fatalf("expected 1 error, got %d", len(report.Errors))
+		}
+
+		pe := report.Errors[0]
+		// ReasonParseFailed has priority over ReasonUpstreamError
+		if pe.Reason != dipstick.ReasonParseFailed {
+			t.Errorf("expected reason %v, got %v", dipstick.ReasonParseFailed, pe.Reason)
+		}
+		if pe.Retryable {
+			t.Errorf("parse_failed should not be retryable")
+		}
+		if pe.Source != dipstick.SourceOAuthAPI {
+			t.Errorf("expected source %v where parse failure happened, got %v", dipstick.SourceOAuthAPI, pe.Source)
+		}
+		if !errors.Is(pe, dipstick.ErrParseFailed) {
+			t.Errorf("expected errors.Is(pe, ErrParseFailed) to be true")
+		}
+	})
+
+	t.Run("auth failure propagation", func(t *testing.T) {
+		tier1 := &fakeSource{
+			id:        dipstick.SourceOAuthAPI,
+			tier:      dipstick.TierAPI,
+			available: true,
+			fetchErr:  dipstick.ErrNotAuthenticated,
+		}
+		tier2 := &fakeSource{
+			id:        dipstick.SourceLocalState,
+			tier:      dipstick.TierLocalState,
+			available: false,
+		}
+
+		adapter := &fakeAdapter{
+			id:      dipstick.ProviderCodex,
+			sources: []dipstick.Source{tier1, tier2},
+		}
+
+		resolver := dipstick.NewResolver(map[dipstick.ProviderID]dipstick.Adapter{
+			dipstick.ProviderCodex: adapter,
+		}, dipstick.ResolverConfig{})
+
+		report, err := resolver.Resolve(context.Background(), []dipstick.ProviderID{dipstick.ProviderCodex})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(report.Errors) != 1 {
+			t.Fatalf("expected 1 error, got %d", len(report.Errors))
+		}
+
+		pe := report.Errors[0]
+		if pe.Reason != dipstick.ReasonNotAuthenticated {
+			t.Errorf("expected reason %v, got %v", dipstick.ReasonNotAuthenticated, pe.Reason)
+		}
+		if !errors.Is(pe, dipstick.ErrNotAuthenticated) {
+			t.Errorf("expected errors.Is(pe, ErrNotAuthenticated) to be true")
+		}
+	})
+}
+
+func TestResolver_SecretScrubbingInResolution(t *testing.T) {
+	fakeToken := "sk-ant-api03-abcdef1234567890abcdef123456"
+	tier1 := &fakeSource{
+		id:        dipstick.SourceOAuthAPI,
+		tier:      dipstick.TierAPI,
+		available: true,
+		fetchErr:  fmt.Errorf("401 Unauthorized: Authorization: Bearer %s with token=%s", fakeToken, fakeToken),
+	}
+
+	adapter := &fakeAdapter{
+		id:      dipstick.ProviderClaude,
+		sources: []dipstick.Source{tier1},
+	}
+
+	resolver := dipstick.NewResolver(map[dipstick.ProviderID]dipstick.Adapter{
+		dipstick.ProviderClaude: adapter,
+	}, dipstick.ResolverConfig{})
+
+	report, err := resolver.Resolve(context.Background(), []dipstick.ProviderID{dipstick.ProviderClaude})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(report.Errors) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(report.Errors))
+	}
+
+	pe := report.Errors[0]
+	if strings.Contains(pe.Detail, fakeToken) {
+		t.Errorf("pe.Detail leaked secret: %s", pe.Detail)
+	}
+	if !strings.Contains(pe.Detail, "[REDACTED]") {
+		t.Errorf("pe.Detail expected to contain [REDACTED], got: %s", pe.Detail)
 	}
 }
