@@ -28,6 +28,9 @@ var (
 
 	// ErrNotSupported indicates the vendor exposes no usage surface or feature is unsupported.
 	ErrNotSupported = types.ErrNotSupported
+
+	// ErrSourceTimeout indicates a source fetch or availability check timed out.
+	ErrSourceTimeout = types.ErrSourceTimeout
 )
 
 // Sentinel returns the standard sentinel error corresponding to the given Reason,

@@ -1,17 +1,22 @@
 package codex_test
 
 import (
+	"bufio"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
+	_ "modernc.org/sqlite"
 
 	"github.com/mattwalters/dipstick"
 	"github.com/mattwalters/dipstick/internal/adapters/codex"
@@ -27,6 +32,130 @@ func makeTestJWT(header map[string]any, payload map[string]any) string {
 	return fmt.Sprintf("%s.%s.%s", hB64, pB64, sigB64)
 }
 
+type mockPipeTransport struct {
+	reader *io.PipeReader
+	writer *io.PipeWriter
+}
+
+func (m *mockPipeTransport) Read(p []byte) (int, error) {
+	return m.reader.Read(p)
+}
+
+func (m *mockPipeTransport) Write(p []byte) (int, error) {
+	return m.writer.Write(p)
+}
+
+func (m *mockPipeTransport) Close() error {
+	_ = m.reader.Close()
+	return m.writer.Close()
+}
+
+func createMockAppServerRunner(handler func(reqMethod string, reqID int64, params json.RawMessage) (any, *mockRPCError)) codex.AppServerRunner {
+	return codex.AppServerRunnerFunc(func(ctx context.Context) (io.ReadWriteCloser, error) {
+		clientReader, serverWriter := io.Pipe()
+		serverReader, clientWriter := io.Pipe()
+
+		go func() {
+			defer func() {
+				_ = serverReader.Close()
+				_ = serverWriter.Close()
+			}()
+
+			scanner := bufio.NewScanner(serverReader)
+			for scanner.Scan() {
+				line := scanner.Bytes()
+				if len(line) == 0 {
+					continue
+				}
+
+				var req struct {
+					JSONRPC string          `json:"jsonrpc"`
+					ID      int64           `json:"id"`
+					Method  string          `json:"method"`
+					Params  json.RawMessage `json:"params"`
+				}
+
+				if err := json.Unmarshal(line, &req); err != nil {
+					continue
+				}
+
+				result, rpcErr := handler(req.Method, req.ID, req.Params)
+				var resp map[string]any
+				if rpcErr != nil {
+					resp = map[string]any{
+						"jsonrpc": "2.0",
+						"id":      req.ID,
+						"error": map[string]any{
+							"code":    rpcErr.Code,
+							"message": rpcErr.Message,
+						},
+					}
+				} else {
+					resp = map[string]any{
+						"jsonrpc": "2.0",
+						"id":      req.ID,
+						"result":  result,
+					}
+				}
+
+				respBytes, err := json.Marshal(resp)
+				if err != nil {
+					return
+				}
+				respBytes = append(respBytes, '\n')
+				if _, err := serverWriter.Write(respBytes); err != nil {
+					return
+				}
+			}
+		}()
+
+		return &mockPipeTransport{
+			reader: clientReader,
+			writer: clientWriter,
+		}, nil
+	})
+}
+
+type mockRPCError struct {
+	Code    int
+	Message string
+}
+
+func createTestStateDB(t *testing.T, dbPath string, tokens []int64) {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	_, err = db.Exec(`CREATE TABLE threads (
+		id TEXT PRIMARY KEY,
+		rollout_path TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL,
+		source TEXT NOT NULL,
+		model_provider TEXT NOT NULL,
+		cwd TEXT NOT NULL,
+		title TEXT NOT NULL,
+		sandbox_policy TEXT NOT NULL,
+		approval_mode TEXT NOT NULL,
+		tokens_used INTEGER NOT NULL DEFAULT 0
+	);`)
+	if err != nil {
+		t.Fatalf("failed creating schema: %v", err)
+	}
+
+	for i, tok := range tokens {
+		_, err := db.Exec(`INSERT INTO threads (id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode, tokens_used)
+			VALUES (?, 'path', 1000, 1000, 'src', 'codex', '/dir', 'title', 'auto', 'auto', ?);`,
+			fmt.Sprintf("thread-%d", i), tok)
+		if err != nil {
+			t.Fatalf("failed inserting row: %v", err)
+		}
+	}
+}
+
 func TestAdapter_IDAndName(t *testing.T) {
 	a := codex.New()
 	if a == nil {
@@ -39,15 +168,328 @@ func TestAdapter_IDAndName(t *testing.T) {
 		t.Errorf("expected name %q, got %q", "codex", a.Name())
 	}
 	sources := a.Sources()
-	if len(sources) != 1 {
-		t.Fatalf("expected 1 source, got %d", len(sources))
+	if len(sources) != 2 {
+		t.Fatalf("expected 2 sources, got %d", len(sources))
 	}
-	if sources[0].ID() != dipstick.SourceLocalState {
-		t.Errorf("expected source ID %q, got %q", dipstick.SourceLocalState, sources[0].ID())
+	if sources[0].ID() != dipstick.SourceAppServer {
+		t.Errorf("expected source 0 ID %q, got %q", dipstick.SourceAppServer, sources[0].ID())
 	}
-	if sources[0].Tier() != dipstick.TierLocalState {
-		t.Errorf("expected source tier %v, got %v", dipstick.TierLocalState, sources[0].Tier())
+	if sources[0].Tier() != dipstick.TierLocalRPC {
+		t.Errorf("expected source 0 tier %v, got %v", dipstick.TierLocalRPC, sources[0].Tier())
 	}
+	if sources[1].ID() != dipstick.SourceLocalState {
+		t.Errorf("expected source 1 ID %q, got %q", dipstick.SourceLocalState, sources[1].ID())
+	}
+	if sources[1].Tier() != dipstick.TierLocalState {
+		t.Errorf("expected source 1 tier %v, got %v", dipstick.TierLocalState, sources[1].Tier())
+	}
+}
+
+func TestAppServerSource_FullSuccess(t *testing.T) {
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	runner := createMockAppServerRunner(func(reqMethod string, reqID int64, params json.RawMessage) (any, *mockRPCError) {
+		switch reqMethod {
+		case "initialize":
+			return map[string]any{
+				"userAgent":      "dipstick/0.148.0",
+				"codexHome":      "/Users/test/.codex",
+				"platformFamily": "unix",
+				"platformOs":     "macos",
+			}, nil
+		case "account/rateLimits/read":
+			return map[string]any{
+				"rateLimits": map[string]any{
+					"limitId": "codex",
+					"primary": map[string]any{
+						"usedPercent":        15.5,
+						"windowDurationMins": 300,
+						"resetsAt":           now.Add(4 * time.Hour).Unix(),
+					},
+					"secondary": map[string]any{
+						"usedPercent":        2.0,
+						"windowDurationMins": 10080,
+						"resetsAt":           now.Add(6 * 24 * time.Hour).Unix(),
+					},
+					"credits": map[string]any{
+						"hasCredits": false,
+						"unlimited":  false,
+						"balance":    "0",
+					},
+					"planType": "plus",
+				},
+			}, nil
+		case "account/usage/read":
+			return map[string]any{
+				"summary": map[string]any{
+					"lifetimeTokens":        44535901,
+					"peakDailyTokens":       19503139,
+					"longestRunningTurnSec": 622,
+					"currentStreakDays":     0,
+					"longestStreakDays":     3,
+				},
+				"dailyUsageBuckets": []map[string]any{
+					{"startDate": "2026-08-24", "tokens": 19503139},
+				},
+			}, nil
+		case "account/read":
+			return map[string]any{
+				"account": map[string]any{
+					"type":     "chatgpt",
+					"email":    "developer@example.com",
+					"planType": "plus",
+				},
+				"requiresOpenaiAuth": true,
+			}, nil
+		default:
+			return nil, &mockRPCError{Code: -32601, Message: "method not found"}
+		}
+	})
+
+	adapter := codex.New(
+		codex.WithAppServerRunner(runner),
+		codex.WithNow(func() time.Time { return now }),
+	)
+
+	src := adapter.Sources()[0]
+	if !src.Available(context.Background()) {
+		t.Fatalf("expected appServerSource to be available with injected runner")
+	}
+
+	report, err := src.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("Fetch failed: %v", err)
+	}
+
+	if report.Provider != dipstick.ProviderCodex {
+		t.Errorf("expected provider codex, got %s", report.Provider)
+	}
+	if report.Source != dipstick.SourceAppServer {
+		t.Errorf("expected source app_server, got %s", report.Source)
+	}
+	if report.Tier != dipstick.TierLocalRPC {
+		t.Errorf("expected tier local_rpc, got %v", report.Tier)
+	}
+	if report.Confidence != dipstick.ConfidenceExact {
+		t.Errorf("expected confidence exact, got %s", report.Confidence)
+	}
+
+	if report.Identity == nil {
+		t.Fatalf("expected non-nil Identity")
+	}
+	if report.Identity.Email != "developer@example.com" {
+		t.Errorf("expected email developer@example.com, got %q", report.Identity.Email)
+	}
+	if report.Identity.Plan != "plus" {
+		t.Errorf("expected plan plus, got %q", report.Identity.Plan)
+	}
+
+	if report.Tokens == nil || report.Tokens.TotalTokens == nil {
+		t.Fatalf("expected non-nil TotalTokens")
+	}
+	if *report.Tokens.TotalTokens != 44535901 {
+		t.Errorf("expected 44535901 total tokens, got %d", *report.Tokens.TotalTokens)
+	}
+
+	if len(report.Windows) != 2 {
+		t.Fatalf("expected 2 windows, got %d", len(report.Windows))
+	}
+
+	// Window 0: Primary 5h
+	w0 := report.Windows[0]
+	if w0.Label != "primary" {
+		t.Errorf("window 0: expected label primary, got %q", w0.Label)
+	}
+	if w0.UsedPercent == nil || *w0.UsedPercent != 15.5 {
+		t.Errorf("window 0: expected used percent 15.5, got %v", w0.UsedPercent)
+	}
+	if w0.WindowDurationSeconds == nil || *w0.WindowDurationSeconds != 18000 {
+		t.Errorf("window 0: expected duration 18000s, got %v", w0.WindowDurationSeconds)
+	}
+	expectedReset0 := now.Add(4 * time.Hour)
+	if w0.ResetsAt == nil || !w0.ResetsAt.Equal(expectedReset0) {
+		t.Errorf("window 0: expected resetsAt %v, got %v", expectedReset0, w0.ResetsAt)
+	}
+
+	// Window 1: Secondary weekly
+	w1 := report.Windows[1]
+	if w1.Label != "secondary" {
+		t.Errorf("window 1: expected label secondary, got %q", w1.Label)
+	}
+	if w1.UsedPercent == nil || *w1.UsedPercent != 2.0 {
+		t.Errorf("window 1: expected used percent 2.0, got %v", w1.UsedPercent)
+	}
+	if w1.WindowDurationSeconds == nil || *w1.WindowDurationSeconds != 604800 {
+		t.Errorf("window 1: expected duration 604800s, got %v", w1.WindowDurationSeconds)
+	}
+}
+
+func TestAppServerSource_ErrorHandling(t *testing.T) {
+	t.Run("handshake initialize error", func(t *testing.T) {
+		runner := createMockAppServerRunner(func(reqMethod string, reqID int64, params json.RawMessage) (any, *mockRPCError) {
+			return nil, &mockRPCError{Code: -32000, Message: "daemon initialization failed"}
+		})
+
+		adapter := codex.New(codex.WithAppServerRunner(runner))
+		src := adapter.Sources()[0]
+
+		_, err := src.Fetch(context.Background())
+		if err == nil {
+			t.Fatalf("expected error from failed initialize")
+		}
+		if !errors.Is(err, dipstick.ErrUpstreamError) {
+			t.Errorf("expected ErrUpstreamError, got %v", err)
+		}
+	})
+
+	t.Run("start error", func(t *testing.T) {
+		runner := codex.AppServerRunnerFunc(func(ctx context.Context) (io.ReadWriteCloser, error) {
+			return nil, fmt.Errorf("process spawn failed")
+		})
+
+		adapter := codex.New(codex.WithAppServerRunner(runner))
+		src := adapter.Sources()[0]
+
+		_, err := src.Fetch(context.Background())
+		if err == nil {
+			t.Fatalf("expected error on start failure")
+		}
+		if !errors.Is(err, dipstick.ErrUpstreamError) {
+			t.Errorf("expected ErrUpstreamError, got %v", err)
+		}
+	})
+
+	t.Run("timeout on query", func(t *testing.T) {
+		runner := codex.AppServerRunnerFunc(func(ctx context.Context) (io.ReadWriteCloser, error) {
+			clientReader, _ := io.Pipe()
+			serverReader, clientWriter := io.Pipe()
+			go func() {
+				_, _ = io.Copy(io.Discard, serverReader)
+			}()
+			return &mockPipeTransport{
+				reader: clientReader,
+				writer: clientWriter,
+			}, nil
+		})
+
+		adapter := codex.New(
+			codex.WithAppServerRunner(runner),
+			codex.WithAppServerTimeout(20*time.Millisecond),
+		)
+		src := adapter.Sources()[0]
+
+		_, err := src.Fetch(context.Background())
+		if err == nil {
+			t.Fatalf("expected error on timeout")
+		}
+		if !errors.Is(err, dipstick.ErrSourceTimeout) {
+			t.Errorf("expected ErrSourceTimeout, got %v", err)
+		}
+	})
+}
+
+func TestLocalStateSource_SQLiteTokenAccounting(t *testing.T) {
+	fixturePath := filepath.Join("testdata", "auth_subscription.json")
+	authData, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("reading fixture: %v", err)
+	}
+
+	t.Run("valid sqlite database calculates cumulative tokens", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		codexDir := filepath.Join(tmpDir, ".codex")
+		if err := os.MkdirAll(codexDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(codexDir, "auth.json"), authData, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		dbPath := filepath.Join(codexDir, "state_5.sqlite")
+		createTestStateDB(t, dbPath, []int64{1000, 2500, 500, 10000})
+
+		resolver := localstate.New(
+			localstate.WithHomeDir(tmpDir),
+			localstate.WithEnvMap(map[string]string{}),
+		)
+		adapter := codex.New(codex.WithResolver(resolver))
+
+		localSrc := adapter.Sources()[1]
+		report, err := localSrc.Fetch(context.Background())
+		if err != nil {
+			t.Fatalf("Fetch failed: %v", err)
+		}
+
+		if report.Tokens == nil || report.Tokens.TotalTokens == nil {
+			t.Fatalf("expected non-nil TotalTokens from sqlite")
+		}
+		// 1000 + 2500 + 500 + 10000 = 14000
+		if *report.Tokens.TotalTokens != 14000 {
+			t.Errorf("expected 14000 total tokens, got %d", *report.Tokens.TotalTokens)
+		}
+		if report.Confidence != dipstick.ConfidenceDerived {
+			t.Errorf("expected confidence derived, got %s", report.Confidence)
+		}
+	})
+
+	t.Run("missing sqlite database returns nil tokens gracefully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		codexDir := filepath.Join(tmpDir, ".codex")
+		if err := os.MkdirAll(codexDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(codexDir, "auth.json"), authData, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		resolver := localstate.New(
+			localstate.WithHomeDir(tmpDir),
+			localstate.WithEnvMap(map[string]string{}),
+		)
+		adapter := codex.New(codex.WithResolver(resolver))
+
+		localSrc := adapter.Sources()[1]
+		report, err := localSrc.Fetch(context.Background())
+		if err != nil {
+			t.Fatalf("Fetch failed: %v", err)
+		}
+
+		if report.Tokens != nil {
+			t.Errorf("expected nil Tokens when sqlite file is absent, got %+v", report.Tokens)
+		}
+		if report.Identity.Email != "developer@example.com" {
+			t.Errorf("expected valid identity, got %s", report.Identity.Email)
+		}
+	})
+
+	t.Run("corrupt sqlite file handled gracefully without panic", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		codexDir := filepath.Join(tmpDir, ".codex")
+		if err := os.MkdirAll(codexDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(codexDir, "auth.json"), authData, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(codexDir, "state_5.sqlite"), []byte("not a real sqlite database"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		resolver := localstate.New(
+			localstate.WithHomeDir(tmpDir),
+			localstate.WithEnvMap(map[string]string{}),
+		)
+		adapter := codex.New(codex.WithResolver(resolver))
+
+		localSrc := adapter.Sources()[1]
+		report, err := localSrc.Fetch(context.Background())
+		if err != nil {
+			t.Fatalf("Fetch failed on corrupt sqlite: %v", err)
+		}
+
+		if report.Tokens != nil {
+			t.Errorf("expected nil Tokens when sqlite file is corrupt, got %+v", report.Tokens)
+		}
+	})
 }
 
 func TestLocalStateSource_SubscriptionFixture(t *testing.T) {
@@ -73,10 +515,7 @@ func TestLocalStateSource_SubscriptionFixture(t *testing.T) {
 	adapter := codex.New(codex.WithResolver(resolver))
 
 	sources := adapter.Sources()
-	if len(sources) == 0 {
-		t.Fatalf("expected sources from adapter")
-	}
-	src := sources[0]
+	src := sources[1] // LocalStateSource
 
 	ctx := context.Background()
 	if !src.Available(ctx) {
@@ -113,7 +552,7 @@ func TestLocalStateSource_SubscriptionFixture(t *testing.T) {
 		t.Errorf("expected Windows to be nil from Tier 2 source, got %+v", report.Windows)
 	}
 	if report.Tokens != nil {
-		t.Errorf("expected Tokens to be nil from Tier 2 source, got %+v", report.Tokens)
+		t.Errorf("expected Tokens to be nil from Tier 2 source without sqlite, got %+v", report.Tokens)
 	}
 }
 
@@ -139,8 +578,7 @@ func TestLocalStateSource_ApiKeyFixture(t *testing.T) {
 	)
 	adapter := codex.New(codex.WithResolver(resolver))
 
-	sources := adapter.Sources()
-	src := sources[0]
+	src := adapter.Sources()[1]
 
 	ctx := context.Background()
 	if !src.Available(ctx) {
@@ -187,7 +625,7 @@ func TestLocalStateSource_PaddedJwtFixture(t *testing.T) {
 		localstate.WithEnvMap(map[string]string{}),
 	)
 	adapter := codex.New(codex.WithResolver(resolver))
-	src := adapter.Sources()[0]
+	src := adapter.Sources()[1]
 
 	report, err := src.Fetch(context.Background())
 	if err != nil {
@@ -239,7 +677,7 @@ func TestLocalStateSource_MalformedAndCorruptFixtures(t *testing.T) {
 				localstate.WithEnvMap(map[string]string{}),
 			)
 			adapter := codex.New(codex.WithResolver(resolver))
-			src := adapter.Sources()[0]
+			src := adapter.Sources()[1]
 
 			report, err := src.Fetch(context.Background())
 			if err == nil {
@@ -260,7 +698,7 @@ func TestLocalStateSource_MissingAndEmptyAuthFile(t *testing.T) {
 			localstate.WithEnvMap(map[string]string{}),
 		)
 		adapter := codex.New(codex.WithResolver(resolver))
-		src := adapter.Sources()[0]
+		src := adapter.Sources()[1]
 
 		if src.Available(context.Background()) {
 			t.Errorf("expected Available to be false for missing auth.json")
@@ -283,7 +721,7 @@ func TestLocalStateSource_MissingAndEmptyAuthFile(t *testing.T) {
 
 		resolver := localstate.New(localstate.WithHomeDir(tmpDir), localstate.WithEnvMap(map[string]string{}))
 		adapter := codex.New(codex.WithResolver(resolver))
-		src := adapter.Sources()[0]
+		src := adapter.Sources()[1]
 
 		_, err := src.Fetch(context.Background())
 		if err == nil || !errors.Is(err, dipstick.ErrParseFailed) {
@@ -299,7 +737,7 @@ func TestLocalStateSource_MissingAndEmptyAuthFile(t *testing.T) {
 
 		resolver := localstate.New(localstate.WithHomeDir(tmpDir), localstate.WithEnvMap(map[string]string{}))
 		adapter := codex.New(codex.WithResolver(resolver))
-		src := adapter.Sources()[0]
+		src := adapter.Sources()[1]
 
 		_, err := src.Fetch(context.Background())
 		if err == nil || !errors.Is(err, dipstick.ErrParseFailed) {
@@ -334,7 +772,7 @@ func TestLocalStateSource_EnvironmentOverrides(t *testing.T) {
 			}),
 		)
 		adapter := codex.New(codex.WithResolver(resolver))
-		src := adapter.Sources()[0]
+		src := adapter.Sources()[1]
 
 		if !src.Available(context.Background()) {
 			t.Fatalf("expected source available via CODEX_HOME")
@@ -365,7 +803,7 @@ func TestLocalStateSource_EnvironmentOverrides(t *testing.T) {
 			}),
 		)
 		adapter := codex.New(codex.WithResolver(resolver))
-		src := adapter.Sources()[0]
+		src := adapter.Sources()[1]
 
 		if !src.Available(context.Background()) {
 			t.Fatalf("expected source available via CODEX_CONFIG_DIR")
@@ -406,7 +844,7 @@ func TestLocalStateSource_JWTVariousPlansAndFallbacks(t *testing.T) {
 			resolver := localstate.New(localstate.WithHomeDir(tmpDir), localstate.WithEnvMap(map[string]string{}))
 			adapter := codex.New(codex.WithResolver(resolver))
 
-			rep, err := adapter.Sources()[0].Fetch(context.Background())
+			rep, err := adapter.Sources()[1].Fetch(context.Background())
 			if err != nil {
 				t.Fatalf("Fetch failed for plan %s: %v", plan, err)
 			}
@@ -435,7 +873,7 @@ func TestLocalStateSource_JWTVariousPlansAndFallbacks(t *testing.T) {
 		resolver := localstate.New(localstate.WithHomeDir(tmpDir), localstate.WithEnvMap(map[string]string{}))
 		adapter := codex.New(codex.WithResolver(resolver))
 
-		rep, err := adapter.Sources()[0].Fetch(context.Background())
+		rep, err := adapter.Sources()[1].Fetch(context.Background())
 		if err != nil {
 			t.Fatalf("Fetch failed: %v", err)
 		}
@@ -470,7 +908,7 @@ func TestLocalStateSource_JWTVariousPlansAndFallbacks(t *testing.T) {
 		resolver := localstate.New(localstate.WithHomeDir(tmpDir), localstate.WithEnvMap(map[string]string{}))
 		adapter := codex.New(codex.WithResolver(resolver))
 
-		rep, err := adapter.Sources()[0].Fetch(context.Background())
+		rep, err := adapter.Sources()[1].Fetch(context.Background())
 		if err != nil {
 			t.Fatalf("Fetch failed: %v", err)
 		}
@@ -501,7 +939,7 @@ func TestLocalStateSource_Detect(t *testing.T) {
 	}
 }
 
-func TestLocalStateSource_CollectWholeRunAndSchemaValidation(t *testing.T) {
+func TestAdapter_LadderResolutionFallback(t *testing.T) {
 	fixturePath := filepath.Join("testdata", "auth_subscription.json")
 	data, err := os.ReadFile(fixturePath)
 	if err != nil {
@@ -513,8 +951,94 @@ func TestLocalStateSource_CollectWholeRunAndSchemaValidation(t *testing.T) {
 	_ = os.MkdirAll(codexDir, 0o700)
 	_ = os.WriteFile(filepath.Join(codexDir, "auth.json"), data, 0o600)
 
+	createTestStateDB(t, filepath.Join(codexDir, "state_5.sqlite"), []int64{5000})
+
+	// AppServer fails with error
+	failingRunner := codex.AppServerRunnerFunc(func(ctx context.Context) (io.ReadWriteCloser, error) {
+		return nil, fmt.Errorf("app-server binary crashed")
+	})
+
 	resolver := localstate.New(localstate.WithHomeDir(tmpDir), localstate.WithEnvMap(map[string]string{}))
-	adapter := codex.New(codex.WithResolver(resolver))
+	adapter := codex.New(
+		codex.WithResolver(resolver),
+		codex.WithAppServerRunner(failingRunner),
+	)
+
+	report, err := dipstick.Collect(context.Background(),
+		dipstick.WithProviders(dipstick.ProviderCodex),
+		dipstick.WithAdapter(adapter),
+	)
+	if err != nil {
+		t.Fatalf("Collect failed: %v", err)
+	}
+
+	if len(report.Providers) != 1 {
+		t.Fatalf("expected 1 provider report, got %d (errors: %+v)", len(report.Providers), report.Errors)
+	}
+	pr := report.Providers[0]
+	if pr.Source != dipstick.SourceLocalState {
+		t.Errorf("expected fallback to SourceLocalState, got %s", pr.Source)
+	}
+	if pr.Confidence != dipstick.ConfidenceDerived {
+		t.Errorf("expected ConfidenceDerived, got %s", pr.Confidence)
+	}
+	if pr.Identity.Email != "developer@example.com" {
+		t.Errorf("expected email developer@example.com, got %s", pr.Identity.Email)
+	}
+	if pr.Tokens == nil || *report.Providers[0].Tokens.TotalTokens != 5000 {
+		t.Errorf("expected 5000 tokens from sqlite fallback, got %+v", pr.Tokens)
+	}
+	if pr.Windows != nil {
+		t.Errorf("expected Windows to be nil on fallback, got %+v", pr.Windows)
+	}
+}
+
+func TestAdapter_CollectWholeRunAndSchemaValidation(t *testing.T) {
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	runner := createMockAppServerRunner(func(reqMethod string, reqID int64, params json.RawMessage) (any, *mockRPCError) {
+		switch reqMethod {
+		case "initialize":
+			return map[string]any{"userAgent": "dipstick/0.1.0"}, nil
+		case "account/rateLimits/read":
+			return map[string]any{
+				"rateLimits": map[string]any{
+					"limitId": "codex",
+					"primary": map[string]any{
+						"usedPercent":        10.0,
+						"windowDurationMins": 300,
+						"resetsAt":           now.Add(5 * time.Hour).Unix(),
+					},
+					"secondary": map[string]any{
+						"usedPercent":        5.0,
+						"windowDurationMins": 10080,
+						"resetsAt":           now.Add(7 * 24 * time.Hour).Unix(),
+					},
+					"planType": "pro",
+				},
+			}, nil
+		case "account/usage/read":
+			return map[string]any{
+				"summary": map[string]any{
+					"lifetimeTokens": 1000000,
+				},
+			}, nil
+		case "account/read":
+			return map[string]any{
+				"account": map[string]any{
+					"type":     "chatgpt",
+					"email":    "schema-user@example.com",
+					"planType": "pro",
+				},
+			}, nil
+		default:
+			return nil, &mockRPCError{Code: -32601, Message: "not found"}
+		}
+	})
+
+	adapter := codex.New(
+		codex.WithAppServerRunner(runner),
+		codex.WithNow(func() time.Time { return now }),
+	)
 
 	report, err := dipstick.Collect(context.Background(),
 		dipstick.WithProviders(dipstick.ProviderCodex),
@@ -531,20 +1055,11 @@ func TestLocalStateSource_CollectWholeRunAndSchemaValidation(t *testing.T) {
 	if pr.Provider != dipstick.ProviderCodex {
 		t.Errorf("expected provider codex, got %s", pr.Provider)
 	}
-	if pr.Source != dipstick.SourceLocalState {
-		t.Errorf("expected source local_state, got %s", pr.Source)
+	if pr.Source != dipstick.SourceAppServer {
+		t.Errorf("expected source app_server, got %s", pr.Source)
 	}
-	if pr.Confidence != dipstick.ConfidenceDerived {
-		t.Errorf("expected confidence derived, got %s", pr.Confidence)
-	}
-	if pr.Identity == nil || pr.Identity.Email != "developer@example.com" || pr.Identity.Plan != "pro" {
-		t.Errorf("unexpected identity: %+v", pr.Identity)
-	}
-	if pr.Windows != nil {
-		t.Errorf("expected Windows to be nil, got %+v", pr.Windows)
-	}
-	if pr.Tokens != nil {
-		t.Errorf("expected Tokens to be nil, got %+v", pr.Tokens)
+	if pr.Confidence != dipstick.ConfidenceExact {
+		t.Errorf("expected confidence exact, got %s", pr.Confidence)
 	}
 
 	// Validate JSON schema
@@ -593,7 +1108,7 @@ func TestLocalStateSource_ZeroLeakageInvariant(t *testing.T) {
 	resolver := localstate.New(localstate.WithHomeDir(tmpDir), localstate.WithEnvMap(map[string]string{}))
 	adapter := codex.New(codex.WithResolver(resolver))
 
-	report, err := adapter.Sources()[0].Fetch(context.Background())
+	report, err := adapter.Sources()[1].Fetch(context.Background())
 	if err != nil {
 		t.Fatalf("Fetch failed: %v", err)
 	}

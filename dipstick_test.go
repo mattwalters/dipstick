@@ -80,8 +80,8 @@ func TestCollect_Default(t *testing.T) {
 		}
 		if id == dipstick.ProviderCodex {
 			if inProv {
-				if pr.Source != dipstick.SourceLocalState {
-					t.Errorf("codex provider: expected source %s, got %s", dipstick.SourceLocalState, pr.Source)
+				if pr.Source != dipstick.SourceAppServer && pr.Source != dipstick.SourceLocalState {
+					t.Errorf("codex provider: expected source %s or %s, got %s", dipstick.SourceAppServer, dipstick.SourceLocalState, pr.Source)
 				}
 			}
 		} else if id == dipstick.ProviderClaude {
