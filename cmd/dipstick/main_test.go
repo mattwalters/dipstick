@@ -51,6 +51,30 @@ func loadGoldenReport(t *testing.T, relPath string) (*dipstick.Report, []byte) {
 	return &rep, data
 }
 
+func loadGoldenDoctorReport(t *testing.T, relPath string) (*dipstick.DoctorReport, []byte) {
+	t.Helper()
+	rootRel := filepath.Join("..", "..", relPath)
+	data, err := os.ReadFile(rootRel)
+	if err != nil {
+		t.Fatalf("failed reading golden file %s: %v", rootRel, err)
+	}
+	var rep dipstick.DoctorReport
+	if err := json.Unmarshal(data, &rep); err != nil {
+		t.Fatalf("failed unmarshaling golden file %s: %v", rootRel, err)
+	}
+	return &rep, data
+}
+
+func loadGoldenText(t *testing.T, relPath string) string {
+	t.Helper()
+	rootRel := filepath.Join("..", "..", relPath)
+	data, err := os.ReadFile(rootRel)
+	if err != nil {
+		t.Fatalf("failed reading golden file %s: %v", rootRel, err)
+	}
+	return string(data)
+}
+
 func TestRun_ExitCode0_ProviderReported(t *testing.T) {
 	origCollect := collectFn
 	defer func() { collectFn = origCollect }()
@@ -130,6 +154,26 @@ func TestRun_ExitCode2_BadInvocations(t *testing.T) {
 			args:        []string{"extra-arg"},
 			errContains: "unexpected argument",
 		},
+		{
+			name:        "doctor unknown flag",
+			args:        []string{"doctor", "--nonexistent-flag"},
+			errContains: "flag provided but not defined",
+		},
+		{
+			name:        "doctor negative timeout",
+			args:        []string{"doctor", "-timeout", "-5s"},
+			errContains: "invalid timeout",
+		},
+		{
+			name:        "doctor negative source timeout",
+			args:        []string{"doctor", "-source-timeout", "-2s"},
+			errContains: "invalid source timeout",
+		},
+		{
+			name:        "doctor unexpected argument",
+			args:        []string{"doctor", "unexpected-arg"},
+			errContains: "unexpected argument",
+		},
 	}
 
 	for _, tt := range tests {
@@ -193,6 +237,128 @@ func TestRun_GoldenOutputByteIdentical(t *testing.T) {
 	}
 }
 
+func TestRun_Doctor_GoldenOutput(t *testing.T) {
+	origDoctor := doctorFn
+	defer func() { doctorFn = origDoctor }()
+
+	goldenDoctorRep, goldenDoctorJSON := loadGoldenDoctorReport(t, filepath.Join("testdata", "doctor_full.golden.json"))
+	goldenDoctorText := loadGoldenText(t, filepath.Join("testdata", "doctor_full.golden.txt"))
+
+	doctorFn = func(ctx context.Context, opts ...dipstick.Option) (*dipstick.DoctorReport, error) {
+		return goldenDoctorRep, nil
+	}
+
+	t.Run("doctor human readable text full", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"doctor"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("expected exit code 0, got %d. stderr: %s", code, stderr.String())
+		}
+		if stdout.String() != goldenDoctorText {
+			t.Errorf("doctor text output mismatch.\nGot:\n%s\nWant:\n%s", stdout.String(), goldenDoctorText)
+		}
+	})
+
+	t.Run("doctor --json flag full", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"doctor", "--json"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("expected exit code 0, got %d. stderr: %s", code, stderr.String())
+		}
+		if !bytes.Equal(stdout.Bytes(), goldenDoctorJSON) {
+			t.Errorf("doctor json output mismatch.\nGot:\n%s\nWant:\n%s", stdout.String(), string(goldenDoctorJSON))
+		}
+	})
+
+	t.Run("--doctor flag alias", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"--doctor"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("expected exit code 0 on --doctor, got %d. stderr: %s", code, stderr.String())
+		}
+		if stdout.String() != goldenDoctorText {
+			t.Errorf("doctor text output mismatch on --doctor flag.\nGot:\n%s\nWant:\n%s", stdout.String(), goldenDoctorText)
+		}
+	})
+
+	t.Run("--doctor flag with --json", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"--doctor", "--json"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("expected exit code 0 on --doctor --json, got %d. stderr: %s", code, stderr.String())
+		}
+		if !bytes.Equal(stdout.Bytes(), goldenDoctorJSON) {
+			t.Errorf("doctor json mismatch on --doctor --json.\nGot:\n%s\nWant:\n%s", stdout.String(), string(goldenDoctorJSON))
+		}
+	})
+
+	t.Run("--doctor flag with options", func(t *testing.T) {
+		var capturedOpts []dipstick.Option
+		doctorFn = func(ctx context.Context, opts ...dipstick.Option) (*dipstick.DoctorReport, error) {
+			capturedOpts = opts
+			return goldenDoctorRep, nil
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"--doctor", "-p", "claude", "-timeout", "10s", "-source-timeout", "2s", "--policy", "local", "--strict"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("expected exit code 0, got %d. stderr: %s", code, stderr.String())
+		}
+		if len(capturedOpts) == 0 {
+			t.Fatalf("expected options captured from --doctor with flags")
+		}
+	})
+
+	fixtures := []struct {
+		name     string
+		jsonPath string
+		txtPath  string
+	}{
+		{
+			name:     "working",
+			jsonPath: filepath.Join("testdata", "doctor_working.golden.json"),
+			txtPath:  filepath.Join("testdata", "doctor_working.golden.txt"),
+		},
+		{
+			name:     "degraded",
+			jsonPath: filepath.Join("testdata", "doctor_degraded.golden.json"),
+			txtPath:  filepath.Join("testdata", "doctor_degraded.golden.txt"),
+		},
+		{
+			name:     "absent",
+			jsonPath: filepath.Join("testdata", "doctor_absent.golden.json"),
+			txtPath:  filepath.Join("testdata", "doctor_absent.golden.txt"),
+		},
+	}
+
+	for _, fix := range fixtures {
+		t.Run("fixture_"+fix.name, func(t *testing.T) {
+			fixRep, fixJSON := loadGoldenDoctorReport(t, fix.jsonPath)
+			fixText := loadGoldenText(t, fix.txtPath)
+
+			doctorFn = func(ctx context.Context, opts ...dipstick.Option) (*dipstick.DoctorReport, error) {
+				return fixRep, nil
+			}
+
+			var txtStdout, txtStderr bytes.Buffer
+			if code := run([]string{"doctor"}, &txtStdout, &txtStderr); code != 0 {
+				t.Fatalf("expected exit code 0, got %d", code)
+			}
+			if txtStdout.String() != fixText {
+				t.Errorf("%s text mismatch.\nGot:\n%s\nWant:\n%s", fix.name, txtStdout.String(), fixText)
+			}
+
+			var jsonStdout, jsonStderr bytes.Buffer
+			if code := run([]string{"doctor", "--json"}, &jsonStdout, &jsonStderr); code != 0 {
+				t.Fatalf("expected exit code 0, got %d", code)
+			}
+			if !bytes.Equal(jsonStdout.Bytes(), fixJSON) {
+				t.Errorf("%s json mismatch.\nGot:\n%s\nWant:\n%s", fix.name, jsonStdout.String(), string(fixJSON))
+			}
+		})
+	}
+}
+
 func TestRun_SubcommandsAndVersion(t *testing.T) {
 	expectedVersion := fmt.Sprintf("dipstick %s (commit: %s, built: %s)\n", Version, Commit, Date)
 
@@ -232,17 +398,6 @@ func TestRun_SubcommandsAndVersion(t *testing.T) {
 		}
 	})
 
-	t.Run("doctor subcommand", func(t *testing.T) {
-		var stdout, stderr bytes.Buffer
-		code := run([]string{"doctor"}, &stdout, &stderr)
-		if code != 0 {
-			t.Fatalf("expected exit code 0, got %d", code)
-		}
-		if !strings.Contains(stderr.String(), "not yet implemented") {
-			t.Errorf("expected doctor stub message on stderr, got %q", stderr.String())
-		}
-	})
-
 	t.Run("help flag", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		code := run([]string{"--help"}, &stdout, &stderr)
@@ -251,6 +406,17 @@ func TestRun_SubcommandsAndVersion(t *testing.T) {
 		}
 		if !strings.Contains(stderr.String(), "Usage: dipstick") {
 			t.Errorf("expected usage output on stderr, got %q", stderr.String())
+		}
+	})
+
+	t.Run("doctor help flag", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"doctor", "--help"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("expected exit code 0 on doctor --help, got %d", code)
+		}
+		if !strings.Contains(stderr.String(), "Usage: dipstick doctor") {
+			t.Errorf("expected doctor usage on stderr, got %q", stderr.String())
 		}
 	})
 }
@@ -330,6 +496,49 @@ func TestSubprocess_SchemaValidation(t *testing.T) {
 
 	if err := schema.Validate(v); err != nil {
 		t.Errorf("stdout failed dipstick.v1 schema validation: %v\nJSON:\n%s", err, stdout.String())
+	}
+}
+
+func TestSubprocess_DoctorOutput(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, testBinaryPath, "doctor")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		t.Fatalf("expected exit code 0 from dipstick doctor, got %v. stderr: %s", err, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "claude") && !strings.Contains(out, "codex") && !strings.Contains(out, "antigravity") {
+		t.Errorf("expected doctor output to contain providers, got:\n%s", out)
+	}
+}
+
+func TestSubprocess_DoctorJSON(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, testBinaryPath, "doctor", "--json")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		t.Fatalf("expected exit code 0 from dipstick doctor --json, got %v. stderr: %s", err, stderr.String())
+	}
+
+	var docReport dipstick.DoctorReport
+	if err := json.Unmarshal(stdout.Bytes(), &docReport); err != nil {
+		t.Fatalf("expected valid DoctorReport JSON on stdout: %v\nOutput:\n%s", err, stdout.String())
+	}
+	if len(docReport.Providers) == 0 {
+		t.Errorf("expected providers in doctor report")
 	}
 }
 

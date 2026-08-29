@@ -1,0 +1,51 @@
+{
+  "schema_version": "dipstick.v1",
+  "generated_at": "2026-08-29T12:00:00Z",
+  "providers": [
+    {
+      "provider": "codex",
+      "installed": true,
+      "binary_path": "/usr/local/bin/codex",
+      "version": "0.148.0",
+      "compat_verdict": "newer_than_verified",
+      "compat_range": ">=0.140 <0.145",
+      "config_dir": {
+        "path": "/Users/user/.codex",
+        "overridden": false
+      },
+      "auth": {
+        "found": true,
+        "location": "file /Users/user/.codex/auth.json",
+        "type": "file",
+        "detail": "token found at /Users/user/.codex/auth.json"
+      },
+      "sources": [
+        {
+          "tier": 1,
+          "source": "oauth_api",
+          "status": "error",
+          "summary": "not_authenticated — auth_mode is API key",
+          "reason": "not_authenticated",
+          "detail": "auth_mode is API key",
+          "next_step": "run `codex auth login`"
+        },
+        {
+          "tier": 2,
+          "source": "local_state",
+          "status": "success",
+          "summary": "ok (identity only)"
+        },
+        {
+          "tier": 3,
+          "source": "app_server",
+          "status": "skipped",
+          "summary": "skipped — higher tier succeeded",
+          "detail": "higher tier succeeded"
+        }
+      ],
+      "next_steps": [
+        "run `codex auth login`"
+      ]
+    }
+  ]
+}
