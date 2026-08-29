@@ -202,3 +202,13 @@ func TestProviderReport_JSON(t *testing.T) {
 		t.Errorf("expected nil error, got %v", unmarshaledNoError.Err)
 	}
 }
+
+func TestCollect_SingleProviderCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := dipstick.Collect(ctx, dipstick.WithProviders(dipstick.ProviderClaude))
+	if err == nil {
+		t.Fatalf("expected context cancellation error for single provider, got nil")
+	}
+}

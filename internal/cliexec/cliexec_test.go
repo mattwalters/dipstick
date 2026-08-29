@@ -133,3 +133,21 @@ func TestRun_NilContextHandling(t *testing.T) {
 		t.Errorf("expected 'hi', got %q", res.StdoutString())
 	}
 }
+
+func TestRun_ExplicitEmptyEnv(t *testing.T) {
+	t.Setenv("HOST_TEST_ENV_VAR", "should_not_leak")
+	runner := cliexec.New(
+		cliexec.WithEnv([]string{}),
+		cliexec.WithScrubSecrets(false),
+	)
+
+	ctx := context.Background()
+	res, err := runner.Run(ctx, "sh", "-c", "echo $HOST_TEST_ENV_VAR")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if res.StdoutString() != "" {
+		t.Errorf("expected empty output for explicit empty env, got %q", res.StdoutString())
+	}
+}

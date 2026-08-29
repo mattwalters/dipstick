@@ -194,6 +194,10 @@ func Collect(ctx context.Context, opts ...Option) (*Report, error) {
 		adapter := factory()
 
 		pr, err := adapter.Collect(ctx, providerCfg)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+
 		if err != nil {
 			report.Providers[id] = ProviderReport{
 				ProviderID: id,
@@ -205,6 +209,10 @@ func Collect(ctx context.Context, opts ...Option) (*Report, error) {
 			}
 			report.Providers[id] = pr
 		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	return report, nil

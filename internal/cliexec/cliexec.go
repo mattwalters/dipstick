@@ -137,7 +137,7 @@ func (r *Runner) Run(ctx context.Context, name string, args ...string) (*Result,
 	}
 
 	var baseEnv []string
-	if len(r.Env) > 0 {
+	if r.Env != nil {
 		baseEnv = r.Env
 	} else {
 		baseEnv = os.Environ()
