@@ -66,23 +66,26 @@ func TestCollect_Default(t *testing.T) {
 		t.Errorf("expected non-zero GeneratedAt")
 	}
 
-	// The adapters are stubs until the source-ladder resolver lands, so each
-	// provider is accounted for as a not_supported error rather than as a
-	// provider report: dipstick.v1 has no way to spell "collected nothing"
-	// inside a ProviderReport.
 	for _, id := range dipstick.Providers() {
-		pe, ok := findError(report, id)
-		if !ok {
-			t.Errorf("missing provider %s in report errors", id)
+		pe, inErr := findError(report, id)
+		pr, inProv := findProvider(report, id)
+		if !inErr && !inProv {
+			t.Errorf("missing provider %s in both report errors and providers", id)
 			continue
 		}
-		if pe.Reason != dipstick.ReasonNotSupported {
-			t.Errorf("provider %s: expected reason %s, got %s", id, dipstick.ReasonNotSupported, pe.Reason)
+		if id == dipstick.ProviderCodex {
+			if inProv {
+				if pr.Source != dipstick.SourceLocalState {
+					t.Errorf("codex provider: expected source %s, got %s", dipstick.SourceLocalState, pr.Source)
+				}
+			}
+		} else {
+			if !inErr {
+				t.Errorf("expected stub provider %s in report errors", id)
+			} else if pe.Reason != dipstick.ReasonNotSupported {
+				t.Errorf("provider %s: expected reason %s, got %s", id, dipstick.ReasonNotSupported, pe.Reason)
+			}
 		}
-	}
-
-	if len(report.Providers) != 0 {
-		t.Errorf("expected no provider reports from stub adapters, got %d", len(report.Providers))
 	}
 }
 

@@ -1,0 +1,4 @@
+{
+  "auth_mode": "chatgpt",
+  "tokens": {
+    "id_token": "corrupt_json_missing_brace

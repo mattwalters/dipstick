@@ -1,0 +1,8 @@
+{
+  "auth_mode": "chatgpt",
+  "tokens": {
+    "id_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InBhZGRlZEBleGFtcGxlLmNvbSIsImh0dHBzOi8vYXBpLm9wZW5haS5jb20vYXV0aCI6eyJjaGF0Z3B0X2FjY291bnRfaWQiOiJhY2MtcGFkZGVkLTk5OSIsImNoYXRncHRfcGxhbl90eXBlIjoicGx1cyJ9fQ==.ZHVtbXlzaWduYXR1cmVieXRlcw==",
+    "access_token": "redacted-access-token",
+    "account_id": "acc-padded-999"
+  }
+}

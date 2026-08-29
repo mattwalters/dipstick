@@ -1,0 +1,11 @@
+{
+  "auth_mode": "chatgpt",
+  "OPENAI_API_KEY": "",
+  "tokens": {
+    "id_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjLWNoYXRncHQtMTIzNDUiLCJjaGF0Z3B0X3BsYW5fdHlwZSI6InBybyIsImNoYXRncHRfdXNlcl9pZCI6InVzZXItb3BlbmFpLTY3ODkwIn0sImVtYWlsIjoiZGV2ZWxvcGVyQGV4YW1wbGUuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsImlzcyI6Imh0dHBzOi8vYXV0aDAub3BlbmFpLmNvbS8iLCJzdWIiOiJhdXRoMHx1c2VyLTY3ODkwIiwiYXVkIjoiY2xpZW50LWlkLXNhbXBsZSIsImlhdCI6MTc1NjQ3MDAwMCwiZXhwIjoxNzU2NTU2NDAwfQ.ZHVtbXlzaWduYXR1cmVieXRlcw",
+    "access_token": "redacted-access-token",
+    "refresh_token": "redacted-refresh-token",
+    "account_id": "acc-chatgpt-12345"
+  },
+  "last_refresh": "2026-08-29T10:00:00Z"
+}
