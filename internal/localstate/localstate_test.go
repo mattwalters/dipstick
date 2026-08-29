@@ -352,15 +352,30 @@ func TestResolver_OpenCodePaths(t *testing.T) {
 			t.Fatalf("OpenCodePaths failed: %v", err)
 		}
 
-		expectedConfig := filepath.Join(home, ".opencode")
+		expectedConfig := filepath.Join(home, ".config", "opencode")
 		if paths.ConfigDir != expectedConfig {
 			t.Errorf("ConfigDir: expected %s, got %s", expectedConfig, paths.ConfigDir)
 		}
-		if paths.ConfigFile != filepath.Join(expectedConfig, "config.json") {
-			t.Errorf("ConfigFile: expected %s, got %s", filepath.Join(expectedConfig, "config.json"), paths.ConfigFile)
+		if paths.ConfigFile != filepath.Join(expectedConfig, "opencode.json") {
+			t.Errorf("ConfigFile: expected %s, got %s", filepath.Join(expectedConfig, "opencode.json"), paths.ConfigFile)
 		}
-		if paths.AuthFile != filepath.Join(expectedConfig, "auth.json") {
-			t.Errorf("AuthFile: expected %s, got %s", filepath.Join(expectedConfig, "auth.json"), paths.AuthFile)
+		expectedData := filepath.Join(home, ".local", "share", "opencode")
+		if paths.DataDir != expectedData {
+			t.Errorf("DataDir: expected %s, got %s", expectedData, paths.DataDir)
+		}
+		if paths.DBFile != filepath.Join(expectedData, "opencode.db") {
+			t.Errorf("DBFile: expected %s, got %s", filepath.Join(expectedData, "opencode.db"), paths.DBFile)
+		}
+		if paths.AuthFile != filepath.Join(expectedData, "auth.json") {
+			t.Errorf("AuthFile: expected %s, got %s", filepath.Join(expectedData, "auth.json"), paths.AuthFile)
+		}
+		expectedState := filepath.Join(home, ".local", "state", "opencode")
+		if paths.StateDir != expectedState {
+			t.Errorf("StateDir: expected %s, got %s", expectedState, paths.StateDir)
+		}
+		expectedCache := filepath.Join(home, ".cache", "opencode")
+		if paths.CacheDir != expectedCache {
+			t.Errorf("CacheDir: expected %s, got %s", expectedCache, paths.CacheDir)
 		}
 	})
 
@@ -380,6 +395,48 @@ func TestResolver_OpenCodePaths(t *testing.T) {
 		if paths.ConfigDir != custom {
 			t.Errorf("ConfigDir override: expected %s, got %s", custom, paths.ConfigDir)
 		}
+		if paths.ConfigFile != filepath.Join(custom, "opencode.json") {
+			t.Errorf("ConfigFile: expected %s, got %s", filepath.Join(custom, "opencode.json"), paths.ConfigFile)
+		}
+	})
+
+	t.Run("XDG environment overrides", func(t *testing.T) {
+		r := localstate.New(
+			localstate.WithHomeDir(home),
+			localstate.WithEnvMap(map[string]string{
+				"XDG_CONFIG_HOME": "/custom/xdg/config",
+				"XDG_DATA_HOME":   "/custom/xdg/data",
+				"XDG_STATE_HOME":  "/custom/xdg/state",
+				"XDG_CACHE_HOME":  "/custom/xdg/cache",
+			}),
+		)
+
+		paths, err := r.OpenCodePaths()
+		if err != nil {
+			t.Fatalf("OpenCodePaths failed: %v", err)
+		}
+
+		if paths.ConfigDir != "/custom/xdg/config/opencode" {
+			t.Errorf("ConfigDir XDG override: expected /custom/xdg/config/opencode, got %s", paths.ConfigDir)
+		}
+		if paths.ConfigFile != "/custom/xdg/config/opencode/opencode.json" {
+			t.Errorf("ConfigFile XDG override: expected /custom/xdg/config/opencode/opencode.json, got %s", paths.ConfigFile)
+		}
+		if paths.DataDir != "/custom/xdg/data/opencode" {
+			t.Errorf("DataDir XDG override: expected /custom/xdg/data/opencode, got %s", paths.DataDir)
+		}
+		if paths.DBFile != "/custom/xdg/data/opencode/opencode.db" {
+			t.Errorf("DBFile XDG override: expected /custom/xdg/data/opencode/opencode.db, got %s", paths.DBFile)
+		}
+		if paths.AuthFile != "/custom/xdg/data/opencode/auth.json" {
+			t.Errorf("AuthFile XDG override: expected /custom/xdg/data/opencode/auth.json, got %s", paths.AuthFile)
+		}
+		if paths.StateDir != "/custom/xdg/state/opencode" {
+			t.Errorf("StateDir XDG override: expected /custom/xdg/state/opencode, got %s", paths.StateDir)
+		}
+		if paths.CacheDir != "/custom/xdg/cache/opencode" {
+			t.Errorf("CacheDir XDG override: expected /custom/xdg/cache/opencode, got %s", paths.CacheDir)
+		}
 	})
 }
 
@@ -398,7 +455,7 @@ func TestResolver_ProviderConfigDir(t *testing.T) {
 		{"antigravity", filepath.Join(home, ".gemini", "antigravity-cli")},
 		{"claude", filepath.Join(home, ".claude")},
 		{"codex", filepath.Join(home, ".codex")},
-		{"opencode", filepath.Join(home, ".opencode")},
+		{"opencode", filepath.Join(home, ".config", "opencode")},
 		{"custom", filepath.Join(home, ".config", "dipstick", "providers", "custom")},
 	}
 

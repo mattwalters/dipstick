@@ -120,6 +120,11 @@ func (r *Resolver) getenv(key string) string {
 	return os.Getenv(key)
 }
 
+// Getenv retrieves the value of the environment variable named by key from the resolver's environment.
+func (r *Resolver) Getenv(key string) string {
+	return r.getenv(key)
+}
+
 // ConfigDir returns the configuration directory for dipstick.
 func (r *Resolver) ConfigDir() (string, error) {
 	if env := r.getenv("DIPSTICK_CONFIG_DIR"); env != "" {
@@ -303,30 +308,62 @@ func (r *Resolver) AntigravityPaths() (*AntigravityPaths, error) {
 	}, nil
 }
 
-// OpenCodePaths contains resolved paths for OpenCode configuration and data.
+// OpenCodePaths contains resolved paths for OpenCode configuration, data, and state.
 type OpenCodePaths struct {
 	ConfigDir  string
 	ConfigFile string
+	DataDir    string
+	DBFile     string
 	AuthFile   string
+	StateDir   string
+	CacheDir   string
 }
 
-// OpenCodePaths resolves all filesystem paths for OpenCode.
+// OpenCodePaths resolves all filesystem paths for OpenCode according to XDG specifications.
 func (r *Resolver) OpenCodePaths() (*OpenCodePaths, error) {
+	home, err := r.userHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolving user home directory: %w", err)
+	}
+
 	var configDir string
 	if env := r.getenv("OPENCODE_CONFIG_DIR"); env != "" {
 		configDir = filepath.Clean(env)
+	} else if xdg := r.getenv("XDG_CONFIG_HOME"); xdg != "" {
+		configDir = filepath.Join(xdg, "opencode")
 	} else {
-		home, err := r.userHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("resolving opencode home directory: %w", err)
-		}
-		configDir = filepath.Join(home, ".opencode")
+		configDir = filepath.Join(home, ".config", "opencode")
+	}
+
+	var dataDir string
+	if xdg := r.getenv("XDG_DATA_HOME"); xdg != "" {
+		dataDir = filepath.Join(xdg, "opencode")
+	} else {
+		dataDir = filepath.Join(home, ".local", "share", "opencode")
+	}
+
+	var stateDir string
+	if xdg := r.getenv("XDG_STATE_HOME"); xdg != "" {
+		stateDir = filepath.Join(xdg, "opencode")
+	} else {
+		stateDir = filepath.Join(home, ".local", "state", "opencode")
+	}
+
+	var cacheDir string
+	if xdg := r.getenv("XDG_CACHE_HOME"); xdg != "" {
+		cacheDir = filepath.Join(xdg, "opencode")
+	} else {
+		cacheDir = filepath.Join(home, ".cache", "opencode")
 	}
 
 	return &OpenCodePaths{
 		ConfigDir:  configDir,
-		ConfigFile: filepath.Join(configDir, "config.json"),
-		AuthFile:   filepath.Join(configDir, "auth.json"),
+		ConfigFile: filepath.Join(configDir, "opencode.json"),
+		DataDir:    dataDir,
+		DBFile:     filepath.Join(dataDir, "opencode.db"),
+		AuthFile:   filepath.Join(dataDir, "auth.json"),
+		StateDir:   stateDir,
+		CacheDir:   cacheDir,
 	}, nil
 }
 

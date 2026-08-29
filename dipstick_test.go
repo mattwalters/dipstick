@@ -85,6 +85,12 @@ func TestCollect_Default(t *testing.T) {
 					t.Errorf("claude provider: expected source %s, got %s", dipstick.SourceOAuthAPI, pr.Source)
 				}
 			}
+		} else if id == dipstick.ProviderOpenCode {
+			if inProv {
+				if pr.Confidence != dipstick.ConfidenceDerived {
+					t.Errorf("opencode provider: expected confidence %s, got %s", dipstick.ConfidenceDerived, pr.Confidence)
+				}
+			}
 		} else {
 			if !inErr {
 				t.Errorf("expected stub provider %s in report errors", id)
@@ -254,5 +260,48 @@ func TestCollect_SchemaValidation(t *testing.T) {
 
 	if err := schema.Validate(v); err != nil {
 		t.Errorf("Collect output failed dipstick.v1 validation: %v\nreport: %s", err, data)
+	}
+}
+
+func TestCollect_OpenCode(t *testing.T) {
+	schemaPath := filepath.Join("schema", "dipstick.v1.json")
+	compiler := jsonschema.NewCompiler()
+	compiler.Draft = jsonschema.Draft2020
+	schema, err := compiler.Compile(schemaPath)
+	if err != nil {
+		t.Fatalf("failed compiling schema %s: %v", schemaPath, err)
+	}
+
+	ctx := context.Background()
+	report, err := dipstick.Collect(ctx, dipstick.WithProviders(dipstick.ProviderOpenCode))
+	if err != nil {
+		t.Fatalf("unexpected error collecting OpenCode: %v", err)
+	}
+
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("failed marshalling report: %v", err)
+	}
+
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		t.Fatalf("failed unmarshalling report: %v", err)
+	}
+
+	if err := schema.Validate(v); err != nil {
+		t.Errorf("OpenCode report failed schema validation: %v\nreport: %s", err, string(data))
+	}
+
+	if len(report.Providers) > 0 {
+		pr := report.Providers[0]
+		if pr.Provider != dipstick.ProviderOpenCode {
+			t.Errorf("expected ProviderOpenCode, got %s", pr.Provider)
+		}
+		if pr.Confidence != dipstick.ConfidenceDerived {
+			t.Errorf("expected ConfidenceDerived, got %s", pr.Confidence)
+		}
+		if pr.Tokens == nil {
+			t.Errorf("expected non-nil Tokens")
+		}
 	}
 }

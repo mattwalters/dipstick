@@ -591,7 +591,7 @@ func TestSubprocess_ExitCodes(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		cmd := exec.CommandContext(ctx, testBinaryPath, "-p", "opencode", "--json")
+		cmd := exec.CommandContext(ctx, testBinaryPath, "-p", "antigravity", "--json")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
