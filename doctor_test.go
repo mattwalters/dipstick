@@ -20,6 +20,7 @@ type doctorFakeSource struct {
 	available   bool
 	fetchReport *dipstick.ProviderReport
 	fetchErr    error
+	fetchHook   func()
 }
 
 func (s *doctorFakeSource) ID() dipstick.SourceID     { return s.id }
@@ -28,6 +29,9 @@ func (s *doctorFakeSource) Available(ctx context.Context) bool {
 	return s.available
 }
 func (s *doctorFakeSource) Fetch(ctx context.Context) (*dipstick.ProviderReport, error) {
+	if s.fetchHook != nil {
+		s.fetchHook()
+	}
 	if s.fetchErr != nil {
 		return nil, s.fetchErr
 	}
@@ -526,6 +530,9 @@ func TestDoctor_InvalidOptionsAndCancellation(t *testing.T) {
 			id:        dipstick.SourceOAuthAPI,
 			tier:      dipstick.TierAPI,
 			available: true,
+			fetchHook: func() {
+				cancel()
+			},
 			fetchReport: &dipstick.ProviderReport{
 				Identity: &dipstick.Identity{Email: "test@example.com"},
 			},
@@ -539,15 +546,9 @@ func TestDoctor_InvalidOptionsAndCancellation(t *testing.T) {
 			sources: []dipstick.Source{source1},
 		}
 
-		// Cancel context after first provider
-		go func() {
-			time.Sleep(10 * time.Millisecond)
-			cancel()
-		}()
-
 		_, err := dipstick.Doctor(ctx, dipstick.WithAdapter(adapter), dipstick.WithProviders(dipstick.ProviderClaude, dipstick.ProviderCodex, dipstick.ProviderOpenCode))
-		if err == nil {
-			t.Errorf("expected error on mid-run context cancellation, got nil")
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("expected context.Canceled on mid-run context cancellation, got %v", err)
 		}
 	})
 

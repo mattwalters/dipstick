@@ -243,6 +243,10 @@ func Doctor(ctx context.Context, opts ...Option) (*DoctorReport, error) {
 }
 
 func diagnoseProvider(ctx context.Context, pID ProviderID, adp Adapter, cfg *config) DoctorProviderReport {
+	if ctx.Err() != nil {
+		return DoctorProviderReport{Provider: pID}
+	}
+
 	spec, hasSpec := knownProviderSpecs[pID]
 
 	cfgDirInfo := probeConfigDir(pID)
@@ -331,6 +335,9 @@ func diagnoseProvider(ctx context.Context, pID ProviderID, adp Adapter, cfg *con
 		if src == nil {
 			continue
 		}
+		if ctx.Err() != nil {
+			return DoctorProviderReport{Provider: pID}
+		}
 
 		if higherTierSucceeded {
 			sourceReports = append(sourceReports, DoctorSourceReport{
@@ -371,6 +378,9 @@ func diagnoseProvider(ctx context.Context, pID ProviderID, adp Adapter, cfg *con
 			isAvailable = avail
 		case <-availCtx.Done():
 			availCancel()
+			if ctx.Err() != nil {
+				return DoctorProviderReport{Provider: pID}
+			}
 			availTimedOut = true
 		}
 
@@ -436,6 +446,9 @@ func diagnoseProvider(ctx context.Context, pID ProviderID, adp Adapter, cfg *con
 			fetchErr = res.err
 		case <-fetchCtx.Done():
 			fetchCancel()
+			if ctx.Err() != nil {
+				return DoctorProviderReport{Provider: pID}
+			}
 			fetchTimedOut = true
 		}
 
