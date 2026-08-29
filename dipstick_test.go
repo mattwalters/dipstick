@@ -79,6 +79,12 @@ func TestCollect_Default(t *testing.T) {
 					t.Errorf("codex provider: expected source %s, got %s", dipstick.SourceLocalState, pr.Source)
 				}
 			}
+		} else if id == dipstick.ProviderClaude {
+			if inProv {
+				if pr.Source != dipstick.SourceOAuthAPI {
+					t.Errorf("claude provider: expected source %s, got %s", dipstick.SourceOAuthAPI, pr.Source)
+				}
+			}
 		} else {
 			if !inErr {
 				t.Errorf("expected stub provider %s in report errors", id)
@@ -112,17 +118,22 @@ func TestCollect_WithProviders(t *testing.T) {
 		return
 	}
 
-	if len(report.Errors) != 2 {
-		t.Fatalf("expected 2 unique providers, got %d", len(report.Errors))
+	if len(report.Errors)+len(report.Providers) != 2 {
+		t.Fatalf("expected 2 unique providers total, got %d errors and %d providers", len(report.Errors), len(report.Providers))
 	}
 
-	if _, ok := findError(report, dipstick.ProviderClaude); !ok {
+	_, hasClaudeErr := findError(report, dipstick.ProviderClaude)
+	_, hasClaudeProv := findProvider(report, dipstick.ProviderClaude)
+	if !hasClaudeErr && !hasClaudeProv {
 		t.Errorf("expected claude provider in report")
 	}
 	if _, ok := findError(report, dipstick.ProviderAntigravity); !ok {
 		t.Errorf("expected antigravity provider in report")
 	}
 	if _, ok := findError(report, dipstick.ProviderCodex); ok {
+		t.Errorf("did not expect codex provider in report")
+	}
+	if _, ok := findProvider(report, dipstick.ProviderCodex); ok {
 		t.Errorf("did not expect codex provider in report")
 	}
 }

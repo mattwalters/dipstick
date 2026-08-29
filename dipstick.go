@@ -116,8 +116,7 @@ var defaultAdapterRegistry = map[ProviderID]func() Adapter{
 		return &defaultAdapter{id: ProviderAntigravity}
 	},
 	ProviderClaude: func() Adapter {
-		_ = claude.New()
-		return &defaultAdapter{id: ProviderClaude}
+		return claude.New()
 	},
 	ProviderCodex: func() Adapter {
 		return codex.New()
