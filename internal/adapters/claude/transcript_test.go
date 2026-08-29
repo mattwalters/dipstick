@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -287,6 +288,99 @@ func TestTranscriptSource_Fetch_ContextCancellation(t *testing.T) {
 	_, err := src.Fetch(ctx)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled error, got %v", err)
+	}
+}
+
+func TestTranscriptSource_Fetch_BoundedMaxLineBuffer(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// File with a very long line (e.g. 5000 bytes) and a normal line
+	sessFile := filepath.Join(tmpDir, "session.jsonl")
+	longLine := `{"type":"assistant","timestamp":"2026-08-20T10:00:00Z","sessionId":"sess-1","message":{"id":"msg-long","usage":{"input_tokens":100,"output_tokens":50}},"extra":"` + strings.Repeat("A", 4000) + `"}` + "\n"
+	normalLine := `{"type":"assistant","timestamp":"2026-08-20T10:00:01Z","sessionId":"sess-1","message":{"id":"msg-norm","usage":{"input_tokens":50,"output_tokens":25}}}` + "\n"
+
+	if err := os.WriteFile(sessFile, []byte(longLine+normalLine), 0o644); err != nil {
+		t.Fatalf("failed writing session file: %v", err)
+	}
+
+	// Set maxLineBufferSize to 1000 bytes -> longLine must be skipped without crashing
+	src := claude.NewTranscriptSource(
+		claude.WithProjectsDir(tmpDir),
+		claude.WithMaxLineBuffer(1000),
+	)
+
+	report, err := src.Fetch(ctx)
+	if err != nil {
+		t.Fatalf("Fetch failed: %v", err)
+	}
+
+	if report.Tokens == nil || *report.Tokens.InputTokens != 50 {
+		t.Errorf("expected 50 input tokens from normal line, got %v", report.Tokens)
+	}
+	if src.Stats().LinesSkipped != 1 {
+		t.Errorf("expected 1 line skipped due to max line buffer exceeded, got %d", src.Stats().LinesSkipped)
+	}
+}
+
+func TestTranscriptSource_Fetch_FallbackDeduplication(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// Multi-block turn with missing message.id and requestId, but sharing parentUuid
+	sessFile := filepath.Join(tmpDir, "session-no-msgid.jsonl")
+	line1 := `{"type":"assistant","timestamp":"2026-08-20T10:00:00Z","sessionId":"sess-1","parentUuid":"parent-prompt-1","message":{"role":"assistant","usage":{"input_tokens":100,"output_tokens":50}}}` + "\n"
+	line2 := `{"type":"assistant","timestamp":"2026-08-20T10:00:01Z","sessionId":"sess-1","parentUuid":"parent-prompt-1","message":{"role":"assistant","usage":{"input_tokens":100,"output_tokens":50}}}` + "\n"
+
+	if err := os.WriteFile(sessFile, []byte(line1+line2), 0o644); err != nil {
+		t.Fatalf("failed writing session file: %v", err)
+	}
+
+	src := claude.NewTranscriptSource(
+		claude.WithProjectsDir(tmpDir),
+	)
+
+	report, err := src.Fetch(ctx)
+	if err != nil {
+		t.Fatalf("Fetch failed: %v", err)
+	}
+
+	if report.Tokens == nil || *report.Tokens.InputTokens != 100 {
+		t.Errorf("expected 100 input tokens (deduped across 2 lines), got %v", report.Tokens)
+	}
+	if src.Stats().TurnsCounted != 1 {
+		t.Errorf("expected 1 turn counted, got %d", src.Stats().TurnsCounted)
+	}
+}
+
+func TestTranscriptSource_Fetch_CorruptedTimestampWithSince(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	sessFile := filepath.Join(tmpDir, "session-bad-ts.jsonl")
+	badTSLine := `{"type":"assistant","timestamp":"not-a-valid-timestamp","sessionId":"sess-1","message":{"id":"msg-bad","usage":{"input_tokens":100,"output_tokens":50}}}` + "\n"
+	goodTSLine := `{"type":"assistant","timestamp":"2026-08-20T10:00:00Z","sessionId":"sess-1","message":{"id":"msg-good","usage":{"input_tokens":50,"output_tokens":25}}}` + "\n"
+
+	if err := os.WriteFile(sessFile, []byte(badTSLine+goodTSLine), 0o644); err != nil {
+		t.Fatalf("failed writing session file: %v", err)
+	}
+
+	since := time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)
+	src := claude.NewTranscriptSource(
+		claude.WithProjectsDir(tmpDir),
+		claude.WithSince(since),
+	)
+
+	report, err := src.Fetch(ctx)
+	if err != nil {
+		t.Fatalf("Fetch failed: %v", err)
+	}
+
+	if report.Tokens == nil || *report.Tokens.InputTokens != 50 {
+		t.Errorf("expected 50 input tokens (corrupted timestamp excluded), got %v", report.Tokens)
+	}
+	if src.Stats().LinesSkipped != 1 {
+		t.Errorf("expected 1 line skipped due to corrupted timestamp, got %d", src.Stats().LinesSkipped)
 	}
 }
 

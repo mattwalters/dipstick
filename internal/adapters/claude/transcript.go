@@ -155,14 +155,15 @@ func (s *TranscriptSource) SkippedLines() int64 {
 }
 
 type transcriptEntry struct {
-	Type      string           `json:"type"`
-	SessionID string           `json:"sessionId"`
-	Timestamp string           `json:"timestamp"`
-	RequestID string           `json:"requestId"`
-	UUID      string           `json:"uuid"`
-	AgentID   string           `json:"agentId"`
-	Message   *transcriptMsg   `json:"message"`
-	Usage     *transcriptUsage `json:"usage"`
+	Type       string           `json:"type"`
+	SessionID  string           `json:"sessionId"`
+	Timestamp  string           `json:"timestamp"`
+	RequestID  string           `json:"requestId"`
+	UUID       string           `json:"uuid"`
+	ParentUUID string           `json:"parentUuid"`
+	AgentID    string           `json:"agentId"`
+	Message    *transcriptMsg   `json:"message"`
+	Usage      *transcriptUsage `json:"usage"`
 }
 
 type transcriptMsg struct {
@@ -298,98 +299,130 @@ func (s *TranscriptSource) processFile(
 	}()
 
 	reader := bufio.NewReaderSize(f, 64*1024)
+	var lineBuf bytes.Buffer
+	lineTooLong := false
 
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		lineBytes, err := reader.ReadBytes('\n')
-		if len(lineBytes) > 0 {
-			rawLine := bytes.TrimSpace(lineBytes)
-			if len(rawLine) > 0 {
-				stats.LinesScanned++
-
-				if len(rawLine) > s.maxLineBufferSize {
-					// Line exceeds maximum allowable length, skip
-					stats.LinesSkipped++
-					continue
-				}
-
-				if bytes.Contains(rawLine, usageNeedle) {
-					var entry transcriptEntry
-					if err := json.Unmarshal(rawLine, &entry); err != nil {
-						stats.LinesSkipped++
-					} else {
-						// Apply since filter if timestamp present
-						if !s.since.IsZero() && entry.Timestamp != "" {
-							if t, ok := parseTimestamp(entry.Timestamp); ok {
-								if t.Before(s.since) {
-									continue
-								}
-							}
-						}
-
-						usage := entry.Usage
-						if entry.Message != nil && entry.Message.Usage != nil {
-							usage = entry.Message.Usage
-						}
-
-						if usage != nil {
-							hasTokens := (usage.InputTokens != nil && *usage.InputTokens > 0) ||
-								(usage.OutputTokens != nil && *usage.OutputTokens > 0) ||
-								(usage.CacheCreationInputTokens != nil && *usage.CacheCreationInputTokens > 0) ||
-								(usage.CacheReadInputTokens != nil && *usage.CacheReadInputTokens > 0)
-
-							if hasTokens {
-								sessID := entry.SessionID
-								if sessID == "" {
-									sessID = path
-								}
-								var dedupKey string
-								if entry.Message != nil && entry.Message.ID != "" {
-									dedupKey = sessID + ":" + entry.Message.ID
-								} else if entry.RequestID != "" {
-									dedupKey = sessID + ":" + entry.RequestID
-								} else if entry.UUID != "" {
-									dedupKey = sessID + ":" + entry.UUID
-								} else {
-									dedupKey = fmt.Sprintf("%s:%p", sessID, usage)
-								}
-
-								if !seenTurns[dedupKey] {
-									seenTurns[dedupKey] = true
-									stats.TurnsCounted++
-
-									if usage.InputTokens != nil {
-										totals.input += *usage.InputTokens
-									}
-									if usage.OutputTokens != nil {
-										totals.output += *usage.OutputTokens
-									}
-									if usage.CacheCreationInputTokens != nil {
-										totals.cacheWrite += *usage.CacheCreationInputTokens
-									}
-									if usage.CacheReadInputTokens != nil {
-										totals.cacheRead += *usage.CacheReadInputTokens
-									}
-								}
-							}
-						}
-					}
-				} else {
-					if !json.Valid(rawLine) {
-						stats.LinesSkipped++
-					}
-				}
-			}
-		}
-
+		lineChunk, isPrefix, err := reader.ReadLine()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
 			return nil
+		}
+
+		if lineTooLong {
+			if !isPrefix {
+				lineTooLong = false
+			}
+			continue
+		}
+
+		if lineBuf.Len()+len(lineChunk) > s.maxLineBufferSize {
+			stats.LinesSkipped++
+			lineBuf.Reset()
+			if isPrefix {
+				lineTooLong = true
+			}
+			continue
+		}
+
+		lineBuf.Write(lineChunk)
+
+		if isPrefix {
+			continue
+		}
+
+		rawLine := bytes.TrimSpace(lineBuf.Bytes())
+		lineBuf.Reset()
+
+		if len(rawLine) == 0 {
+			continue
+		}
+		stats.LinesScanned++
+
+		if bytes.Contains(rawLine, usageNeedle) {
+			var entry transcriptEntry
+			if err := json.Unmarshal(rawLine, &entry); err != nil {
+				stats.LinesSkipped++
+				continue
+			}
+
+			// Apply since filter
+			if !s.since.IsZero() {
+				if entry.Timestamp == "" {
+					stats.LinesSkipped++
+					continue
+				}
+				t, ok := parseTimestamp(entry.Timestamp)
+				if !ok {
+					stats.LinesSkipped++
+					continue
+				}
+				if t.Before(s.since) {
+					continue
+				}
+			}
+
+			usage := entry.Usage
+			if entry.Message != nil && entry.Message.Usage != nil {
+				usage = entry.Message.Usage
+			}
+
+			if usage != nil {
+				var in, out, cw, cr int64
+				if usage.InputTokens != nil {
+					in = *usage.InputTokens
+				}
+				if usage.OutputTokens != nil {
+					out = *usage.OutputTokens
+				}
+				if usage.CacheCreationInputTokens != nil {
+					cw = *usage.CacheCreationInputTokens
+				}
+				if usage.CacheReadInputTokens != nil {
+					cr = *usage.CacheReadInputTokens
+				}
+
+				hasTokens := in > 0 || out > 0 || cw > 0 || cr > 0
+
+				if hasTokens {
+					sessID := entry.SessionID
+					if sessID == "" {
+						sessID = path
+					}
+					var dedupKey string
+					if entry.Message != nil && entry.Message.ID != "" {
+						dedupKey = sessID + ":" + entry.Message.ID
+					} else if entry.RequestID != "" {
+						dedupKey = sessID + ":" + entry.RequestID
+					} else if entry.ParentUUID != "" {
+						dedupKey = fmt.Sprintf("%s:%s:%d:%d:%d:%d", sessID, entry.ParentUUID, in, out, cw, cr)
+					} else if entry.Timestamp != "" {
+						dedupKey = fmt.Sprintf("%s:%s:%d:%d:%d:%d", sessID, entry.Timestamp, in, out, cw, cr)
+					} else {
+						dedupKey = fmt.Sprintf("%s:%d:%d:%d:%d", sessID, in, out, cw, cr)
+					}
+
+					if !seenTurns[dedupKey] {
+						seenTurns[dedupKey] = true
+						stats.TurnsCounted++
+
+						totals.input += in
+						totals.output += out
+						totals.cacheWrite += cw
+						totals.cacheRead += cr
+					}
+				}
+			}
+		} else {
+			if !json.Valid(rawLine) {
+				stats.LinesSkipped++
+			}
 		}
 	}
 
