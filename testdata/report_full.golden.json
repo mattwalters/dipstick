@@ -1,0 +1,73 @@
+{
+  "schema_version": "dipstick.v1",
+  "generated_at": "2026-08-29T12:00:00Z",
+  "providers": [
+    {
+      "provider": "claude",
+      "source": "oauth_api",
+      "confidence": "exact",
+      "cli_version": "2.1.246",
+      "identity": {
+        "email": "user@example.com",
+        "organization": "Acme Corp",
+        "account_id": "acc_123456",
+        "plan": "Pro"
+      },
+      "windows": [
+        {
+          "label": "session",
+          "used_percent": 15.5,
+          "limit": 100,
+          "used": 15.5,
+          "resets_at": "2026-08-29T17:00:00Z",
+          "window_duration_seconds": 18000
+        },
+        {
+          "label": "weekly",
+          "used_percent": 42,
+          "limit": 1000,
+          "used": 420,
+          "resets_at": "2026-09-01T00:00:00Z",
+          "window_duration_seconds": 604800
+        }
+      ],
+      "tokens": {
+        "input_tokens": 125000,
+        "output_tokens": 34000,
+        "cache_read_tokens": 80000,
+        "cache_write_tokens": 15000,
+        "total_tokens": 159000
+      },
+      "observed_at": "2026-08-29T12:00:00Z"
+    },
+    {
+      "provider": "codex",
+      "source": "local_state",
+      "confidence": "derived",
+      "cli_version": "0.148.0",
+      "identity": {
+        "email": "dev@example.com",
+        "account_id": "user_7890"
+      },
+      "windows": [
+        {
+          "label": "primary",
+          "used_percent": 0,
+          "limit": 500,
+          "used": 0,
+          "resets_at": "2026-08-29T13:00:00Z"
+        }
+      ],
+      "observed_at": "2026-08-29T11:59:30Z"
+    }
+  ],
+  "errors": [
+    {
+      "provider": "antigravity",
+      "reason": "not_supported",
+      "source": "cli_stdout",
+      "detail": "antigravity exposes no usage or quota surface",
+      "retryable": false
+    }
+  ]
+}

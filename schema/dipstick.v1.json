@@ -1,0 +1,254 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mattwalters/dipstick/schema/dipstick.v1.json",
+  "title": "dipstick.v1",
+  "description": "Schema for dipstick v1 AI coding agent usage and quota metering reports.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "providers"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "dipstick.v1",
+      "description": "Schema version identifier for the report payload."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp when the report was generated."
+    },
+    "providers": {
+      "type": "array",
+      "description": "List of provider usage reports.",
+      "items": {
+        "$ref": "#/$defs/provider_report"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "description": "Non-fatal, provider-specific collection errors.",
+      "items": {
+        "$ref": "#/$defs/provider_error"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "provider_id": {
+      "type": "string",
+      "enum": [
+        "claude",
+        "codex",
+        "opencode",
+        "antigravity"
+      ],
+      "description": "Unique identifier for an AI coding agent provider."
+    },
+    "source_id": {
+      "type": "string",
+      "enum": [
+        "oauth_api",
+        "local_state",
+        "app_server",
+        "transcript",
+        "cli_stdout"
+      ],
+      "description": "Identification of the collection tier or mechanism used."
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "exact",
+        "derived",
+        "stale",
+        "unknown"
+      ],
+      "description": "Confidence and precision level of reported quota data."
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "not_installed",
+        "not_authenticated",
+        "credential_expired",
+        "unsupported_version",
+        "parse_failed",
+        "upstream_error",
+        "timeout",
+        "not_supported"
+      ],
+      "description": "Categorized reason for a provider collection failure."
+    },
+    "provider_report": {
+      "type": "object",
+      "description": "Usage and quota report for a single AI coding agent provider.",
+      "required": [
+        "provider",
+        "source",
+        "confidence",
+        "observed_at"
+      ],
+      "properties": {
+        "provider": {
+          "$ref": "#/$defs/provider_id"
+        },
+        "source": {
+          "$ref": "#/$defs/source_id"
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "cli_version": {
+          "type": "string",
+          "description": "Observed vendor CLI or application version string."
+        },
+        "identity": {
+          "$ref": "#/$defs/identity"
+        },
+        "windows": {
+          "type": "array",
+          "description": "Quota and rate limit windows.",
+          "items": {
+            "$ref": "#/$defs/rate_window"
+          }
+        },
+        "tokens": {
+          "$ref": "#/$defs/token_usage"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when this provider's data was observed."
+        }
+      },
+      "additionalProperties": false
+    },
+    "rate_window": {
+      "type": "object",
+      "description": "A rate limit or quota metering window.",
+      "required": [
+        "label"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Label describing the quota window (e.g. session, weekly)."
+        },
+        "used_percent": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Percentage of quota used (0.0 to 100.0+)."
+        },
+        "limit": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Total limit for this window."
+        },
+        "used": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Amount of quota consumed in this window."
+        },
+        "resets_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when this quota window resets."
+        },
+        "window_duration_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Duration of the quota window in seconds."
+        }
+      },
+      "additionalProperties": false
+    },
+    "token_usage": {
+      "type": "object",
+      "description": "Detailed token accounting metrics.",
+      "properties": {
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of prompt/input tokens consumed."
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of completion/output tokens generated."
+        },
+        "cache_read_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of prompt tokens read from cache."
+        },
+        "cache_write_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of prompt tokens written to cache."
+        },
+        "total_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total tokens consumed."
+        }
+      },
+      "additionalProperties": false
+    },
+    "identity": {
+      "type": "object",
+      "description": "Account identity and subscription plan metadata.",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Account email address."
+        },
+        "organization": {
+          "type": "string",
+          "description": "Organization or team name."
+        },
+        "account_id": {
+          "type": "string",
+          "description": "Account or user identifier."
+        },
+        "plan": {
+          "type": "string",
+          "description": "Subscription tier or plan name (e.g. Pro, Team, Enterprise)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "provider_error": {
+      "type": "object",
+      "description": "Non-fatal error encountered when collecting from a provider.",
+      "required": [
+        "provider",
+        "reason",
+        "detail",
+        "retryable"
+      ],
+      "properties": {
+        "provider": {
+          "$ref": "#/$defs/provider_id"
+        },
+        "reason": {
+          "$ref": "#/$defs/reason"
+        },
+        "source": {
+          "$ref": "#/$defs/source_id"
+        },
+        "detail": {
+          "type": "string",
+          "description": "Human-readable description of the error."
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "Whether this error may be resolved on a subsequent retry."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
