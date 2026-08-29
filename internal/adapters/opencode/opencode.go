@@ -63,35 +63,45 @@ type Option func(*Adapter)
 // WithResolver sets the localstate resolver.
 func WithResolver(r *localstate.Resolver) Option {
 	return func(a *Adapter) {
-		a.resolver = r
+		if r != nil {
+			a.resolver = r
+		}
 	}
 }
 
 // WithRunner sets the command execution runner.
 func WithRunner(r *cliexec.Runner) Option {
 	return func(a *Adapter) {
-		a.runner = r
+		if r != nil {
+			a.runner = r
+		}
 	}
 }
 
 // WithHTTPClient sets the HTTP client for local RPC queries.
 func WithHTTPClient(client *http.Client) Option {
 	return func(a *Adapter) {
-		a.httpClient = client
+		if client != nil {
+			a.httpClient = client
+		}
 	}
 }
 
 // WithServerURL sets the base URL for local RPC queries.
 func WithServerURL(url string) Option {
 	return func(a *Adapter) {
-		a.serverURL = url
+		if url != "" {
+			a.serverURL = strings.TrimRight(url, "/")
+		}
 	}
 }
 
 // WithNow sets the time provider function.
 func WithNow(fn func() time.Time) Option {
 	return func(a *Adapter) {
-		a.now = fn
+		if fn != nil {
+			a.now = fn
+		}
 	}
 }
 
@@ -260,7 +270,8 @@ func (a *Adapter) AvailableRPC(ctx context.Context) bool {
 	if client == nil {
 		client = &http.Client{Timeout: 500 * time.Millisecond}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.serverURL+"/session", nil)
+	endpoint := strings.TrimRight(a.serverURL, "/") + "/session"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return false
 	}
@@ -352,7 +363,8 @@ func (a *Adapter) FetchRPC(ctx context.Context) (*TokenUsage, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.serverURL+"/session", nil)
+	endpoint := strings.TrimRight(a.serverURL, "/") + "/session"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating http request: %w", err)
 	}
@@ -366,7 +378,7 @@ func (a *Adapter) FetchRPC(ctx context.Context) (*TokenUsage, error) {
 		return nil, fmt.Errorf("%w: status %d", ErrUpstreamError, resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}

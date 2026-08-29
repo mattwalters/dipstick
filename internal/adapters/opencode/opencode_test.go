@@ -551,3 +551,56 @@ exit 0
 		}
 	})
 }
+
+func TestAdapter_OptionsAndEdgeCases(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("nil option arguments do not cause panics", func(t *testing.T) {
+		a := opencode.New(
+			opencode.WithResolver(nil),
+			opencode.WithRunner(nil),
+			opencode.WithHTTPClient(nil),
+			opencode.WithServerURL(""),
+			opencode.WithNow(nil),
+		)
+
+		det, err := a.Detect(ctx)
+		if err != nil {
+			t.Fatalf("Detect failed: %v", err)
+		}
+		_ = det
+
+		_ = a.AvailableLocalState(ctx)
+		_ = a.AvailableRPC(ctx)
+		_ = a.AvailableCLI(ctx)
+	})
+
+	t.Run("server URL with trailing slash works correctly", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/session" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"tokens_input": 100, "tokens_output": 50, "time_updated": 1000000}]`))
+		}))
+		defer server.Close()
+
+		a := opencode.New(
+			opencode.WithServerURL(server.URL+"/"),
+			opencode.WithHTTPClient(server.Client()),
+		)
+
+		if !a.AvailableRPC(ctx) {
+			t.Errorf("expected AvailableRPC to be true with trailing slash URL")
+		}
+
+		usage, err := a.FetchRPC(ctx)
+		if err != nil {
+			t.Fatalf("FetchRPC failed with trailing slash URL: %v", err)
+		}
+		if usage.InputTokens != 100 || usage.OutputTokens != 50 {
+			t.Errorf("unexpected tokens: %+v", usage)
+		}
+	})
+}
