@@ -36,19 +36,63 @@ func ExampleCollect() {
 
 	// 3. Inspect successful provider reports
 	for _, p := range report.Providers {
-		_ = p.Provider
-		_ = p.Source
-		_ = p.Tier
-		_ = p.Confidence
+		_ = fmt.Sprintf("=== Provider: %s ===", p.Provider)
+		_ = fmt.Sprintf("  Source:     %s (Tier %d)", p.Source, p.Tier)
+		_ = fmt.Sprintf("  Confidence: %s", p.Confidence)
+		if p.CLIVersion != "" {
+			_ = fmt.Sprintf("  CLI Vers:   %s", p.CLIVersion)
+		}
+
 		if p.Identity != nil {
-			_ = p.Identity.Email
+			_ = fmt.Sprintf("  Identity:   %s (%s, Plan: %s)",
+				p.Identity.Email, p.Identity.Organization, p.Identity.Plan)
 		}
-		for _, w := range p.Windows {
-			_ = w.Label
-			_ = w.UsedPercent
+
+		if len(p.Windows) > 0 {
+			for _, w := range p.Windows {
+				usedPct := 0.0
+				if w.UsedPercent != nil {
+					usedPct = *w.UsedPercent
+				}
+				used := 0.0
+				if w.Used != nil {
+					used = *w.Used
+				}
+				limit := 0.0
+				if w.Limit != nil {
+					limit = *w.Limit
+				}
+				resetStr := "unknown"
+				if w.ResetsAt != nil {
+					resetStr = w.ResetsAt.Format(time.RFC3339)
+				}
+				_ = fmt.Sprintf("    - %s: %.1f%% used (%.0f / %.0f, resets %s)",
+					w.Label, usedPct, used, limit, resetStr)
+			}
 		}
+
 		if p.Tokens != nil {
-			_ = p.Tokens.TotalTokens
+			var total, input, output, cacheRead, cacheWrite int64
+			if p.Tokens.TotalTokens != nil {
+				total = *p.Tokens.TotalTokens
+			}
+			if p.Tokens.InputTokens != nil {
+				input = *p.Tokens.InputTokens
+			}
+			if p.Tokens.OutputTokens != nil {
+				output = *p.Tokens.OutputTokens
+			}
+			if p.Tokens.CacheReadTokens != nil {
+				cacheRead = *p.Tokens.CacheReadTokens
+			}
+			if p.Tokens.CacheWriteTokens != nil {
+				cacheWrite = *p.Tokens.CacheWriteTokens
+			}
+			_ = fmt.Sprintf("    - Total:       %d", total)
+			_ = fmt.Sprintf("    - Input:       %d", input)
+			_ = fmt.Sprintf("    - Output:      %d", output)
+			_ = fmt.Sprintf("    - Cache Read:  %d", cacheRead)
+			_ = fmt.Sprintf("    - Cache Write: %d", cacheWrite)
 		}
 	}
 

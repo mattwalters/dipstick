@@ -65,18 +65,50 @@ func main() {
 		if len(p.Windows) > 0 {
 			fmt.Println("  Rate & Quota Windows:")
 			for _, w := range p.Windows {
+				usedPct := 0.0
+				if w.UsedPercent != nil {
+					usedPct = *w.UsedPercent
+				}
+				used := 0.0
+				if w.Used != nil {
+					used = *w.Used
+				}
+				limit := 0.0
+				if w.Limit != nil {
+					limit = *w.Limit
+				}
+				resetStr := "unknown"
+				if w.ResetsAt != nil {
+					resetStr = w.ResetsAt.Format(time.RFC3339)
+				}
 				fmt.Printf("    - %s: %.1f%% used (%.0f / %.0f, resets %s)\n",
-					w.Label, w.UsedPercent, w.Used, w.Limit, w.ResetsAt.Format(time.RFC3339))
+					w.Label, usedPct, used, limit, resetStr)
 			}
 		}
 
 		if p.Tokens != nil {
-			fmt.Printf("  Token Usage:\n")
-			fmt.Printf("    - Total:       %d\n", p.Tokens.TotalTokens)
-			fmt.Printf("    - Input:       %d\n", p.Tokens.InputTokens)
-			fmt.Printf("    - Output:      %d\n", p.Tokens.OutputTokens)
-			fmt.Printf("    - Cache Read:  %d\n", p.Tokens.CacheReadTokens)
-			fmt.Printf("    - Cache Write: %d\n", p.Tokens.CacheWriteTokens)
+			fmt.Println("  Token Usage:")
+			var total, input, output, cacheRead, cacheWrite int64
+			if p.Tokens.TotalTokens != nil {
+				total = *p.Tokens.TotalTokens
+			}
+			if p.Tokens.InputTokens != nil {
+				input = *p.Tokens.InputTokens
+			}
+			if p.Tokens.OutputTokens != nil {
+				output = *p.Tokens.OutputTokens
+			}
+			if p.Tokens.CacheReadTokens != nil {
+				cacheRead = *p.Tokens.CacheReadTokens
+			}
+			if p.Tokens.CacheWriteTokens != nil {
+				cacheWrite = *p.Tokens.CacheWriteTokens
+			}
+			fmt.Printf("    - Total:       %d\n", total)
+			fmt.Printf("    - Input:       %d\n", input)
+			fmt.Printf("    - Output:      %d\n", output)
+			fmt.Printf("    - Cache Read:  %d\n", cacheRead)
+			fmt.Printf("    - Cache Write: %d\n", cacheWrite)
 		}
 		fmt.Println()
 	}
@@ -144,7 +176,7 @@ Dipstick emits structured JSON to stdout and diagnostic logs to stderr, making i
 
 #### 1. Extract quota utilization per provider
 ```bash
-dipstick --json | jq -r '.providers[] | "\(.provider): \(.windows[]?.label // "quota") is \(.windows[]?.used_percent // 0)% used"'
+dipstick --json | jq -r '.providers[] | .provider as $p | .windows[]? | "\($p): \(.label // "quota") is \(.used_percent // 0)% used"'
 ```
 
 #### 2. Alert if any quota window exceeds 80%
@@ -159,7 +191,7 @@ dipstick --json | jq '[.providers[].tokens.total_tokens // 0] | add'
 
 #### 4. Filter missing or unauthenticated providers
 ```bash
-dipstick --json | jq -r '.errors[] | select(.reason == "not_authenticated" or .reason == "not_installed") | "\(.provider): \(.reason) (\(.detail))"'
+dipstick --json | jq -r '.errors[]? | select(.reason == "not_authenticated" or .reason == "not_installed") | "\(.provider): \(.reason) (\(.detail))"'
 ```
 
 #### 5. List account identity per provider
