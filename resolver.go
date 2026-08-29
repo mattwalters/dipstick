@@ -269,12 +269,17 @@ func (r *Resolver) resolveAdapter(ctx context.Context, adapter Adapter) (*Provid
 		}
 
 		if fetchErr != nil {
+			errReason := ReasonForError(fetchErr)
+			if errReason == "" {
+				errReason = ReasonUpstreamError
+			}
 			attempts = append(attempts, SourceAttempt{
 				SourceID: src.ID(),
 				Tier:     src.Tier(),
 				Status:   AttemptStatusError,
 				Duration: duration,
 				Error:    fetchErr.Error(),
+				Reason:   errReason,
 			})
 			continue
 		}
@@ -316,8 +321,8 @@ func (r *Resolver) resolveAdapter(ctx context.Context, adapter Adapter) (*Provid
 	return nil, &ProviderError{
 		Provider:  adapter.ID(),
 		Reason:    reason,
-		Source:    lastAttemptedSource(attempts),
-		Detail:    detail,
+		Source:    sourceForReason(attempts, reason),
+		Detail:    ScrubSecrets(detail),
 		Retryable: retryable,
 		Attempts:  attempts,
 	}
@@ -328,18 +333,47 @@ func (r *Resolver) resolveAdapter(ctx context.Context, adapter Adapter) (*Provid
 // failed tells us more than one that never ran, and one that never ran tells
 // us more than one policy excluded before it could.
 func outcomeFromAttempts(attempts []SourceAttempt) (Reason, string, bool) {
-	var sawTimeout, sawUnavailable, sawAny bool
+	var (
+		bestReason     Reason
+		bestPriority   int
+		bestDetail     string
+		sawTimeout     bool
+		sawUnavailable bool
+		sawAny         bool
+	)
+
 	for _, a := range attempts {
 		sawAny = true
 		switch a.Status {
 		case AttemptStatusError:
-			return ReasonUpstreamError, "all sources exhausted without success", true
+			r := a.Reason
+			if r == "" {
+				r = ReasonUpstreamError
+			}
+			p := reasonPriority(r)
+			if p > bestPriority {
+				bestPriority = p
+				bestReason = r
+				bestDetail = a.Error
+			}
 		case AttemptStatusTimeout:
 			sawTimeout = true
 		case AttemptStatusUnavailable:
 			sawUnavailable = true
 		}
 	}
+
+	if bestPriority > 0 {
+		detail := bestDetail
+		if detail == "" {
+			detail = "all sources exhausted without success"
+		}
+		if bestReason == ReasonUpstreamError && (len(attempts) > 1 || detail == "") {
+			detail = "all sources exhausted without success"
+		}
+		return bestReason, detail, bestReason.Retryable()
+	}
+
 	switch {
 	case sawTimeout:
 		return ReasonTimeout, "all sources timed out", true
@@ -355,6 +389,38 @@ func outcomeFromAttempts(attempts []SourceAttempt) (Reason, string, bool) {
 		// The adapter declared no sources at all.
 		return ReasonNotSupported, "no sources are implemented for this provider yet", false
 	}
+}
+
+func reasonPriority(r Reason) int {
+	switch r {
+	case ReasonParseFailed:
+		return 100 // drift signal, highest priority
+	case ReasonUnsupportedVersion:
+		return 90
+	case ReasonCredentialExpired:
+		return 80
+	case ReasonNotAuthenticated:
+		return 70
+	case ReasonNotInstalled:
+		return 60
+	case ReasonNotSupported:
+		return 50
+	case ReasonUpstreamError:
+		return 40
+	case ReasonTimeout:
+		return 30
+	default:
+		return 10
+	}
+}
+
+func sourceForReason(attempts []SourceAttempt, target Reason) SourceID {
+	for _, a := range attempts {
+		if a.Status == AttemptStatusError && (a.Reason == target || (target == ReasonUpstreamError && a.Reason == "")) {
+			return a.SourceID
+		}
+	}
+	return lastAttemptedSource(attempts)
 }
 
 // lastAttemptedSource names the final rung the ladder actually reached, so a

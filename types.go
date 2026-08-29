@@ -102,6 +102,7 @@ type SourceAttempt struct {
 	Status   AttemptStatus
 	Duration time.Duration
 	Error    string
+	Reason   Reason `json:"-"`
 }
 
 // Report is the top-level container for a complete usage collection run.
@@ -183,10 +184,11 @@ type ProviderError struct {
 
 // Error implements the standard Go error interface for ProviderError.
 func (e ProviderError) Error() string {
+	detail := ScrubSecrets(e.Detail)
 	if e.Source != "" {
-		return fmt.Sprintf("%s (%s): %s: %s", e.Provider, e.Source, e.Reason, e.Detail)
+		return fmt.Sprintf("%s (%s): %s: %s", e.Provider, e.Source, e.Reason, detail)
 	}
-	return fmt.Sprintf("%s: %s: %s", e.Provider, e.Reason, e.Detail)
+	return fmt.Sprintf("%s: %s: %s", e.Provider, e.Reason, detail)
 }
 
 // Ptr returns a pointer to the provided value.
