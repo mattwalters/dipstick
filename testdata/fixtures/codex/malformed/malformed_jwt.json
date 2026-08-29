@@ -1,0 +1,6 @@
+{
+  "auth_mode": "chatgpt",
+  "tokens": {
+    "id_token": "not.a.valid.jwt.token"
+  }
+}

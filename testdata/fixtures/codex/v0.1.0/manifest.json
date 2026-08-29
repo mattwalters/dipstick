@@ -1,0 +1,10 @@
+{
+  "provider": "codex",
+  "vendor_version": "0.1.0",
+  "captured_at": "2026-08-29T12:00:00Z",
+  "os": "darwin",
+  "arch": "arm64",
+  "sources": [
+    "local_state.json"
+  ]
+}

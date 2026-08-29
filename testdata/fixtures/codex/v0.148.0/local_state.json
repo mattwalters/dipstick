@@ -1,0 +1,9 @@
+{
+  "auth_mode": "chatgpt",
+  "tokens": {
+    "access_token": "mock-access-token",
+    "account_id": "acc-chatgpt-12345",
+    "id_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImRldmVsb3BlckBleGFtcGxlLmNvbSIsImh0dHBzOi8vYXBpLm9wZW5haS5jb20vYXV0aCI6eyJjaGF0Z3B0X2FjY291bnRfaWQiOiJhY2MtY2hhdGdwdC0xMjM0NSIsImNoYXRncHRfcGxhbl90eXBlIjoicHJvIiwiY2hhdGdwdF91c2VyX2lkIjoidXNlci0xMjM0NSJ9fQ.dummy_jwt_signature",
+    "refresh_token": "mock-refresh-token"
+  }
+}

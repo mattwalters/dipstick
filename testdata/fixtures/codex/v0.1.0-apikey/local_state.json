@@ -1,0 +1,7 @@
+{
+  "auth_mode": "api_key",
+  "OPENAI_API_KEY": "sk-mock-key-0000000000000000",
+  "tokens": {
+    "account_id": "acc-chatgpt-12345"
+  }
+}

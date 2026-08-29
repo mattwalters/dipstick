@@ -1,0 +1,10 @@
+{
+  "provider": "claude",
+  "vendor_version": "2.1.0",
+  "captured_at": "2026-08-20T10:00:00Z",
+  "os": "linux",
+  "arch": "amd64",
+  "sources": [
+    "oauth_api.json"
+  ]
+}

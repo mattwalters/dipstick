@@ -25,9 +25,7 @@ matrix:
 	go run ./cmd/genmatrix
 
 capture:
-	@echo "Capturing local vendor fixtures..."
-	@go test ./internal/adapters/... -v -run 'TestCapture' || true
-	@echo "Remember to verify and redact sensitive credentials in testdata/ before committing!"
+	go run ./internal/tools/capture
 
 clean:
 	go clean

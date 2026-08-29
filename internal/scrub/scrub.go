@@ -103,3 +103,164 @@ func Scrub(s string) string {
 
 	return res
 }
+
+// SecretFinding describes a detected secret, credential, or personal identifier.
+type SecretFinding struct {
+	Rule    string `json:"rule"`
+	Match   string `json:"match"`
+	Message string `json:"message"`
+}
+
+var (
+	emailRegex      = regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b`)
+	privateKeyRegex = regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)
+)
+
+var allowedEmailDomains = map[string]bool{
+	"example.com": true,
+	"example.org": true,
+	"example.net": true,
+	"test.com":    true,
+	"test":        true,
+	"invalid":     true,
+	"localhost":   true,
+}
+
+// isSyntheticOrRedacted checks if a matched string is a known synthetic placeholder or redacted marker.
+func isSyntheticOrRedacted(s string) bool {
+	lower := strings.ToLower(s)
+	if strings.Contains(lower, "[redacted]") || strings.Contains(lower, "redacted") {
+		return true
+	}
+	if strings.Contains(lower, "mock") || strings.Contains(lower, "placeholder") || strings.Contains(lower, "dummy") {
+		return true
+	}
+	if strings.Contains(lower, "sk-ant-test") || strings.Contains(lower, "sk-test") {
+		return true
+	}
+	return false
+}
+
+// FindSecrets scans input text and returns any detected live secrets, credentials, or personal identifiers.
+func FindSecrets(content string) []SecretFinding {
+	if content == "" {
+		return nil
+	}
+
+	var findings []SecretFinding
+
+	// 1. Check for unredacted Authorization headers
+	for _, match := range authHeaderRegex.FindAllString(content, -1) {
+		if !isSyntheticOrRedacted(match) {
+			findings = append(findings, SecretFinding{
+				Rule:    "unredacted_auth_header",
+				Match:   match,
+				Message: "detected unredacted Authorization header",
+			})
+		}
+	}
+
+	// 2. Check for private keys
+	for _, match := range privateKeyRegex.FindAllString(content, -1) {
+		findings = append(findings, SecretFinding{
+			Rule:    "private_key",
+			Match:   match,
+			Message: "detected private key block",
+		})
+	}
+
+	// 3. Check for Anthropic API keys
+	for _, match := range anthropicKeyRegex.FindAllString(content, -1) {
+		if !isSyntheticOrRedacted(match) {
+			findings = append(findings, SecretFinding{
+				Rule:    "anthropic_api_key",
+				Match:   match,
+				Message: "detected Anthropic API key format",
+			})
+		}
+	}
+
+	// 4. Check for OpenAI API keys
+	for _, match := range openAIKeyRegex.FindAllString(content, -1) {
+		if !isSyntheticOrRedacted(match) {
+			findings = append(findings, SecretFinding{
+				Rule:    "openai_api_key",
+				Match:   match,
+				Message: "detected OpenAI API key format",
+			})
+		}
+	}
+
+	// 5. Check for GitHub tokens
+	for _, match := range githubTokenRegex.FindAllString(content, -1) {
+		if !isSyntheticOrRedacted(match) {
+			findings = append(findings, SecretFinding{
+				Rule:    "github_token",
+				Match:   match,
+				Message: "detected GitHub personal access token",
+			})
+		}
+	}
+
+	// 6. Check for Google API keys
+	for _, match := range googleAPIKeyRegex.FindAllString(content, -1) {
+		if !isSyntheticOrRedacted(match) {
+			findings = append(findings, SecretFinding{
+				Rule:    "google_api_key",
+				Match:   match,
+				Message: "detected Google API key",
+			})
+		}
+	}
+
+	// 7. Check for AWS access keys
+	for _, match := range awsAccessKeyRegex.FindAllString(content, -1) {
+		if !isSyntheticOrRedacted(match) {
+			findings = append(findings, SecretFinding{
+				Rule:    "aws_access_key",
+				Match:   match,
+				Message: "detected AWS access key identifier",
+			})
+		}
+	}
+
+	// 8. Check for Slack tokens
+	for _, match := range slackTokenRegex.FindAllString(content, -1) {
+		if !isSyntheticOrRedacted(match) {
+			findings = append(findings, SecretFinding{
+				Rule:    "slack_token",
+				Match:   match,
+				Message: "detected Slack token",
+			})
+		}
+	}
+
+	// 9. Check for HuggingFace tokens
+	for _, match := range huggingfaceRegex.FindAllString(content, -1) {
+		if !isSyntheticOrRedacted(match) {
+			findings = append(findings, SecretFinding{
+				Rule:    "huggingface_token",
+				Match:   match,
+				Message: "detected HuggingFace token",
+			})
+		}
+	}
+
+	// 10. Check for real email addresses (must use synthetic domains like example.com)
+	emailMatches := emailRegex.FindAllStringSubmatch(content, -1)
+	for _, sub := range emailMatches {
+		if len(sub) >= 2 {
+			fullEmail := sub[0]
+			domain := strings.ToLower(sub[1])
+			if !allowedEmailDomains[domain] && !isSyntheticOrRedacted(fullEmail) {
+				findings = append(findings, SecretFinding{
+					Rule:    "real_email_address",
+					Match:   fullEmail,
+					Message: "detected real (non-synthetic) email address: domain must be example.com/org/net or test.com",
+				})
+			}
+		}
+	}
+
+	return findings
+}
