@@ -1,0 +1,26 @@
+{
+  "provider": "claude",
+  "source": "oauth_api",
+  "confidence": "exact",
+  "cli_version": "2.1.246",
+  "identity": {
+    "email": "developer@example.com",
+    "account_id": "acc-claude-test",
+    "plan": "pro"
+  },
+  "windows": [
+    {
+      "label": "session",
+      "used_percent": 14.5,
+      "resets_at": "2026-08-29T17:00:00Z",
+      "window_duration_seconds": 18000
+    },
+    {
+      "label": "weekly",
+      "used_percent": 62.0,
+      "resets_at": "2026-09-05T12:00:00Z",
+      "window_duration_seconds": 604800
+    }
+  ],
+  "observed_at": "2026-08-29T12:00:00Z"
+}

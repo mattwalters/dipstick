@@ -305,9 +305,13 @@ type windowRawData struct {
 	Used        *float64 `json:"used"`
 }
 
-// parseOAuthUsageResponse parses the JSON body returned by Anthropic's OAuth usage endpoint.
-// It dynamically extracts rate windows while mapping five_hour -> session and seven_day -> weekly.
 func parseOAuthUsageResponse(data []byte) ([]types.RateWindow, error) {
+	return ParseOAuthUsageResponse(data)
+}
+
+// ParseOAuthUsageResponse parses the JSON body returned by Anthropic's OAuth usage endpoint.
+// It dynamically extracts rate windows while mapping five_hour -> session and seven_day -> weekly.
+func ParseOAuthUsageResponse(data []byte) ([]types.RateWindow, error) {
 	trimmed := strings.TrimSpace(string(data))
 	if trimmed == "" {
 		return nil, fmt.Errorf("%w: empty response payload", types.ErrParseFailed)

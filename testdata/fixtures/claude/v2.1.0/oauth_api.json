@@ -1,0 +1,12 @@
+{
+  "limits": {
+    "five_hour": {
+      "utilization": 0.0,
+      "resets_at": "2026-08-20T15:00:00Z"
+    },
+    "seven_day": {
+      "utilization": 25.0,
+      "resets_at": "2026-08-27T10:00:00Z"
+    }
+  }
+}
