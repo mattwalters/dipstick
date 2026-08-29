@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mattwalters/dipstick"
+	_ "github.com/mattwalters/dipstick/internal/adapters/claude"
 )
 
 var Version = "dev"

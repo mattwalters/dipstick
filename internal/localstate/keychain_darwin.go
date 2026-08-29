@@ -22,6 +22,7 @@ func NewDarwinKeychainReader() KeychainReader {
 		runner: cliexec.New(
 			cliexec.WithTimeout(5*time.Second),
 			cliexec.WithScrubSecrets(true),
+			cliexec.WithStrictArgv(false),
 		),
 	}
 }
