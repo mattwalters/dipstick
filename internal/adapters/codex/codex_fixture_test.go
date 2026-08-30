@@ -83,11 +83,16 @@ func TestCodexFixtures_ReplayGoldenContracts(t *testing.T) {
 			)
 			adapter := New(WithResolver(resolver))
 
-			sources := adapter.Sources()
-			if len(sources) == 0 {
-				t.Fatalf("adapter returned no sources")
+			var src types.Source
+			for _, s := range adapter.Sources() {
+				if s.ID() == types.SourceLocalState {
+					src = s
+					break
+				}
 			}
-			src := sources[0]
+			if src == nil {
+				t.Fatalf("local_state source not found in adapter.Sources()")
+			}
 
 			if !src.Available(context.Background()) {
 				t.Fatalf("expected source to be available")
@@ -160,7 +165,16 @@ func TestCodexFixtures_MalformedErrorHandling(t *testing.T) {
 				localstate.WithEnvMap(map[string]string{}),
 			)
 			adapter := New(WithResolver(resolver))
-			src := adapter.Sources()[0]
+			var src types.Source
+			for _, s := range adapter.Sources() {
+				if s.ID() == types.SourceLocalState {
+					src = s
+					break
+				}
+			}
+			if src == nil {
+				t.Fatalf("local_state source not found in adapter.Sources()")
+			}
 
 			_, fetchErr := src.Fetch(context.Background())
 			if fetchErr == nil {
@@ -203,9 +217,16 @@ func FuzzDecodeCodexAuth(f *testing.F) {
 			localstate.WithEnvMap(map[string]string{}),
 		)
 		adapter := New(WithResolver(resolver))
-		src := adapter.Sources()[0]
-
-		_, _ = src.Fetch(context.Background())
+		var src types.Source
+		for _, s := range adapter.Sources() {
+			if s.ID() == types.SourceLocalState {
+				src = s
+				break
+			}
+		}
+		if src != nil {
+			_, _ = src.Fetch(context.Background())
+		}
 	})
 }
 
