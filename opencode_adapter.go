@@ -48,6 +48,11 @@ func (a *openCodeAdapter) Sources() []Source {
 	}
 }
 
+// Compat returns the verified compatibility range for OpenCode.
+func (a *openCodeAdapter) Compat() Compat {
+	return a.inner.Compat()
+}
+
 type openCodeLocalStateSource struct {
 	adapter *opencode.Adapter
 }

@@ -96,6 +96,13 @@ type Report struct {
 	Errors        []ProviderError  `json:"errors,omitempty"`
 }
 
+// Compat defines the vendor version compatibility declaration for an adapter.
+type Compat struct {
+	VerifiedRange string `json:"verified_range,omitempty"`
+	LastCheck     string `json:"last_check,omitempty"`
+	Notes         string `json:"notes,omitempty"`
+}
+
 // ProviderReport contains usage, quota, and metadata for a single agent provider.
 type ProviderReport struct {
 	Provider   ProviderID      `json:"provider"`
@@ -105,6 +112,7 @@ type ProviderReport struct {
 	Identity   *Identity       `json:"identity,omitempty"`
 	Windows    []RateWindow    `json:"windows,omitempty"`
 	Tokens     *TokenUsage     `json:"tokens,omitempty"`
+	Warnings   []string        `json:"warnings,omitempty"`
 	ObservedAt time.Time       `json:"observed_at"`
 	Tier       SourceTier      `json:"-"`
 	Attempts   []SourceAttempt `json:"-"`

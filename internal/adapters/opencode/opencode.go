@@ -17,6 +17,7 @@ import (
 
 	"github.com/mattwalters/dipstick/internal/cliexec"
 	"github.com/mattwalters/dipstick/internal/localstate"
+	"github.com/mattwalters/dipstick/internal/types"
 )
 
 var (
@@ -127,6 +128,15 @@ func New(opts ...Option) *Adapter {
 // Name returns the provider identifier string.
 func (a *Adapter) Name() string {
 	return "opencode"
+}
+
+// Compat returns the verified compatibility range declaration for OpenCode.
+func (a *Adapter) Compat() types.Compat {
+	return types.Compat{
+		VerifiedRange: ">=1.18.0",
+		LastCheck:     "2026-08-29",
+		Notes:         "Supported via local SQLite (opencode.db)",
+	}
 }
 
 // Detect inspects the local environment to determine OpenCode installation, auth, and version state.

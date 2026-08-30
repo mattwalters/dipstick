@@ -1,5 +1,13 @@
 package antigravity
 
+import (
+	"context"
+
+	"github.com/mattwalters/dipstick/internal/types"
+)
+
+var _ types.Adapter = (*Adapter)(nil)
+
 // Adapter provides usage collection for the Antigravity coding agent.
 //
 // DIP-12 Spike Findings & Decision:
@@ -28,7 +36,31 @@ func New() *Adapter {
 	return &Adapter{}
 }
 
+// ID returns the unique provider identifier.
+func (a *Adapter) ID() types.ProviderID {
+	return types.ProviderAntigravity
+}
+
 // Name returns the provider identifier.
 func (a *Adapter) Name() string {
-	return "antigravity"
+	return string(types.ProviderAntigravity)
+}
+
+// Detect returns the detection status for Antigravity.
+func (a *Adapter) Detect(ctx context.Context) (types.Detection, error) {
+	return types.Detection{}, nil
+}
+
+// Sources returns the source ladder (empty for Antigravity in v0.1).
+func (a *Adapter) Sources() []types.Source {
+	return nil
+}
+
+// Compat returns the compatibility declaration for Antigravity.
+func (a *Adapter) Compat() types.Compat {
+	return types.Compat{
+		VerifiedRange: "None",
+		LastCheck:     "2026-08-29",
+		Notes:         "Exposes no token usage API; cookie extraction prohibited",
+	}
 }

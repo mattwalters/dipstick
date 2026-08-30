@@ -42,6 +42,7 @@ type doctorFakeAdapter struct {
 	id        dipstick.ProviderID
 	detection dipstick.Detection
 	sources   []dipstick.Source
+	compat    dipstick.Compat
 }
 
 func (a *doctorFakeAdapter) ID() dipstick.ProviderID { return a.id }
@@ -50,6 +51,9 @@ func (a *doctorFakeAdapter) Detect(ctx context.Context) (dipstick.Detection, err
 }
 func (a *doctorFakeAdapter) Sources() []dipstick.Source {
 	return a.sources
+}
+func (a *doctorFakeAdapter) Compat() dipstick.Compat {
+	return a.compat
 }
 
 func TestDoctor_FullyWorkingProvider(t *testing.T) {
@@ -176,7 +180,7 @@ func TestDoctor_PartlyDegradedProvider(t *testing.T) {
 		detection: dipstick.Detection{
 			Installed:     true,
 			Authenticated: true,
-			Version:       "0.148.0",
+			Version:       "0.155.0",
 			BinaryPath:    "/usr/local/bin/codex",
 		},
 		sources: []dipstick.Source{tier1Source, tier2Source, tier3Source},
@@ -195,8 +199,8 @@ func TestDoctor_PartlyDegradedProvider(t *testing.T) {
 	if pr.CompatVerdict != dipstick.CompatNewerThanVerified {
 		t.Errorf("expected newer_than_verified, got %s", pr.CompatVerdict)
 	}
-	if pr.CompatRange != ">=0.140 <0.145" {
-		t.Errorf("expected compat range '>=0.140 <0.145', got %q", pr.CompatRange)
+	if pr.CompatRange != ">=0.148.0 <0.150.0" {
+		t.Errorf("expected compat range '>=0.148.0 <0.150.0', got %q", pr.CompatRange)
 	}
 
 	if len(pr.Sources) != 3 {
@@ -232,7 +236,7 @@ func TestDoctor_PartlyDegradedProvider(t *testing.T) {
 		t.Fatalf("failed rendering text: %v", err)
 	}
 	text := buf.String()
-	if !strings.Contains(text, "codex    0.148.0  ⚠ newer than verified (>=0.140 <0.145)") {
+	if !strings.Contains(text, "codex    0.155.0  ⚠ newer than verified (>=0.148.0 <0.150.0)") {
 		t.Errorf("expected warning header, got:\n%s", text)
 	}
 	if !strings.Contains(text, "usage-api") || !strings.Contains(text, "not_authenticated — auth_mode is API key") {
@@ -386,43 +390,43 @@ func TestDoctor_CompatVerdicts(t *testing.T) {
 			provider:    dipstick.ProviderClaude,
 			version:     "2.1.246",
 			wantVerdict: dipstick.CompatVerified,
-			wantRange:   ">=2.0.0 <2.2.0",
+			wantRange:   ">=2.1.0 <2.2.0",
 		},
 		{
 			provider:    dipstick.ProviderClaude,
 			version:     "1.9.0",
 			wantVerdict: dipstick.CompatOlderThanFloor,
-			wantRange:   "<2.0.0",
+			wantRange:   "<2.1.0",
 		},
 		{
 			provider:    dipstick.ProviderClaude,
 			version:     "2.3.0",
 			wantVerdict: dipstick.CompatNewerThanVerified,
-			wantRange:   ">=2.0.0 <2.2.0",
+			wantRange:   ">=2.1.0 <2.2.0",
 		},
 		{
 			provider:    dipstick.ProviderCodex,
-			version:     "0.142.0",
+			version:     "0.149.0",
 			wantVerdict: dipstick.CompatVerified,
-			wantRange:   ">=0.140 <0.145",
+			wantRange:   ">=0.148.0 <0.150.0",
 		},
 		{
 			provider:    dipstick.ProviderCodex,
-			version:     "0.148.0",
+			version:     "0.155.0",
 			wantVerdict: dipstick.CompatNewerThanVerified,
-			wantRange:   ">=0.140 <0.145",
+			wantRange:   ">=0.148.0 <0.150.0",
 		},
 		{
 			provider:    dipstick.ProviderCodex,
 			version:     "0.135.0",
 			wantVerdict: dipstick.CompatOlderThanFloor,
-			wantRange:   "<0.140.0",
+			wantRange:   "<0.148.0",
 		},
 		{
 			provider:    dipstick.ProviderOpenCode,
-			version:     "0.5.0",
+			version:     "1.18.5",
 			wantVerdict: dipstick.CompatVerified,
-			wantRange:   ">=0.1.0 <1.0.0",
+			wantRange:   ">=1.18.0",
 		},
 	}
 
@@ -448,6 +452,36 @@ func TestDoctor_CompatVerdicts(t *testing.T) {
 				t.Errorf("version %s: expected verdict %s, got %s", tt.version, tt.wantVerdict, pr.CompatVerdict)
 			}
 		})
+	}
+}
+
+func TestDoctor_CustomAdapterCompat(t *testing.T) {
+	customAdp := &doctorFakeAdapter{
+		id: dipstick.ProviderClaude,
+		detection: dipstick.Detection{
+			Installed:  true,
+			Version:    "3.0.0",
+			BinaryPath: "/bin/claude",
+		},
+		compat: dipstick.Compat{
+			VerifiedRange: ">=3.0.0 <4.0.0",
+			LastCheck:     "2026-08-29",
+		},
+	}
+
+	rep, err := dipstick.Doctor(context.Background(), dipstick.WithAdapter(customAdp), dipstick.WithProviders(dipstick.ProviderClaude))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rep.Providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(rep.Providers))
+	}
+	pr := rep.Providers[0]
+	if pr.CompatVerdict != dipstick.CompatVerified {
+		t.Errorf("expected custom adapter compat range to be respected (verified), got %s", pr.CompatVerdict)
+	}
+	if pr.CompatRange != ">=3.0.0 <4.0.0" {
+		t.Errorf("expected compat range '>=3.0.0 <4.0.0', got %q", pr.CompatRange)
 	}
 }
 

@@ -118,6 +118,13 @@
         "tokens": {
           "$ref": "#/$defs/token_usage"
         },
+        "warnings": {
+          "type": "array",
+          "description": "Non-fatal compatibility or drift warnings.",
+          "items": {
+            "type": "string"
+          }
+        },
         "observed_at": {
           "type": "string",
           "format": "date-time",
