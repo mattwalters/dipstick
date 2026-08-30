@@ -791,7 +791,7 @@ func TestSubprocess_ExitCodes(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		cmd := exec.CommandContext(ctx, testBinaryPath, "-p", "opencode", "--pretty")
+		cmd := exec.CommandContext(ctx, testBinaryPath, "-p", "antigravity", "--pretty")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -804,7 +804,7 @@ func TestSubprocess_ExitCodes(t *testing.T) {
 		if exitErr.ExitCode() != 1 {
 			t.Errorf("expected exit code 1, got %d", exitErr.ExitCode())
 		}
-		if !strings.Contains(stdout.String(), "opencode") {
+		if !strings.Contains(stdout.String(), "antigravity") {
 			t.Errorf("expected stdout to contain provider names in pretty format, got %s", stdout.String())
 		}
 	})
