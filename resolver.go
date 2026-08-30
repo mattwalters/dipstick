@@ -180,16 +180,17 @@ func (r *Resolver) resolveAdapter(ctx context.Context, adapter Adapter) (*Provid
 					Retryable: false,
 				}
 			case compat.StatusNewerThanVerified:
+				warn := compat.FormatWarning(det.Version, compatDecl.VerifiedRange, compatDecl.LastCheck)
 				if r.strict {
 					return nil, &ProviderError{
 						Provider:  adapter.ID(),
 						Reason:    ReasonUnsupportedVersion,
-						Detail:    fmt.Sprintf("strict mode: version %s is newer than verified range %s", det.Version, compatDecl.VerifiedRange),
+						Detail:    fmt.Sprintf("strict mode: %s", warn),
 						Retryable: false,
 					}
 				}
 				driftDetected = true
-				driftWarning = compat.FormatWarning(det.Version, compatDecl.VerifiedRange, compatDecl.LastCheck)
+				driftWarning = warn
 			}
 		}
 	}
@@ -369,17 +370,18 @@ func (r *Resolver) resolveAdapter(ctx context.Context, adapter Adapter) (*Provid
 						Attempts:  attempts,
 					}
 				case compat.StatusNewerThanVerified:
+					warn := compat.FormatWarning(final.CLIVersion, compatDecl.VerifiedRange, compatDecl.LastCheck)
 					if r.strict {
 						return nil, &ProviderError{
 							Provider:  adapter.ID(),
 							Reason:    ReasonUnsupportedVersion,
-							Detail:    fmt.Sprintf("strict mode: version %s is newer than verified range %s", final.CLIVersion, compatDecl.VerifiedRange),
+							Detail:    fmt.Sprintf("strict mode: %s", warn),
 							Retryable: false,
 							Attempts:  attempts,
 						}
 					}
 					driftDetected = true
-					driftWarning = compat.FormatWarning(final.CLIVersion, compatDecl.VerifiedRange, compatDecl.LastCheck)
+					driftWarning = warn
 				}
 			}
 		}
