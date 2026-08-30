@@ -1,4 +1,4 @@
-.PHONY: all build install test lint fmt tidy matrix capture clean help
+.PHONY: all build install test lint fmt tidy matrix capture canary clean help
 
 all: build test lint
 
@@ -27,6 +27,9 @@ matrix:
 capture:
 	go run ./internal/tools/capture
 
+canary:
+	go run ./internal/tools/canary
+
 clean:
 	go clean
 	rm -f dipstick
@@ -43,5 +46,6 @@ help:
 	@echo "  tidy     - Prune and verify go.mod / go.sum"
 	@echo "  matrix   - Synchronize support matrix in README.md"
 	@echo "  capture  - Capture local vendor test fixtures"
+	@echo "  canary   - Run scheduled drift canary probes against vendor CLIs"
 	@echo "  clean    - Remove build artifacts and dist/ directory"
 	@echo "  help     - Show this help message"
