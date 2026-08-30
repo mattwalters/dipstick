@@ -169,6 +169,17 @@ func TestRange_Evaluate(t *testing.T) {
 		{"v0.2.x", "0.1.9", compat.StatusOlderThanFloor},
 		{"v0.2.x", "0.2.5", compat.StatusInRange},
 		{"v0.2.x", "0.3.0", compat.StatusNewerThanVerified},
+		{">=1.18.x", "1.17.9", compat.StatusOlderThanFloor},
+		{">=1.18.x", "1.18.2", compat.StatusInRange},
+		{">1.18.x", "1.18.9", compat.StatusOlderThanFloor},
+		{">1.18.x", "1.19.0", compat.StatusInRange},
+		{"<1.18.x", "1.18.0", compat.StatusNewerThanVerified},
+		{"<1.18.x", "1.17.9", compat.StatusInRange},
+		{"<=1.18.x", "1.18.9", compat.StatusInRange},
+		{"<=1.18.x", "1.19.0", compat.StatusNewerThanVerified},
+		{"=1.18.x", "1.17.9", compat.StatusOlderThanFloor},
+		{"=1.18.x", "1.18.5", compat.StatusInRange},
+		{"=1.18.x", "1.19.0", compat.StatusNewerThanVerified},
 
 		// None / N/A
 		{"None", "1.0.0", compat.StatusInRange},

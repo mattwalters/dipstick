@@ -87,11 +87,24 @@ func parseMatches(matches []string, raw string) (SemVer, error) {
 	}
 
 	var prerelease, build string
-	if len(matches) > 4 {
+	if len(matches) > 4 && matches[4] != "" {
 		prerelease = matches[4]
+		for _, seg := range strings.Split(prerelease, ".") {
+			if seg == "" {
+				return SemVer{}, fmt.Errorf("compat: invalid empty pre-release segment in %q", prerelease)
+			}
+			if isAllDigits(seg) && len(seg) > 1 && seg[0] == '0' {
+				return SemVer{}, fmt.Errorf("compat: invalid leading zero in numeric pre-release segment %q", seg)
+			}
+		}
 	}
-	if len(matches) > 5 {
+	if len(matches) > 5 && matches[5] != "" {
 		build = matches[5]
+		for _, seg := range strings.Split(build, ".") {
+			if seg == "" {
+				return SemVer{}, fmt.Errorf("compat: invalid empty build metadata segment in %q", build)
+			}
+		}
 	}
 
 	return SemVer{
@@ -102,6 +115,18 @@ func parseMatches(matches []string, raw string) (SemVer, error) {
 		Build:      build,
 		raw:        raw,
 	}, nil
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // String returns the canonical SemVer representation.

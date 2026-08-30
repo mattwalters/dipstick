@@ -190,20 +190,53 @@ func parseTokenConstraints(tok string) ([]constraint, error) {
 
 	case ">=", ">", "<=", "<", "!=", "=":
 		op := opType(prefix)
-		// Check for wildcard in version string like ">=1.18.x"
+		// Check for wildcard in version string like ">=1.18.x", ">1.18.x", "<=1.18.x", "<1.18.x", "=1.18.x"
 		if strings.ContainsAny(verStr, "xX*") {
-			if op == opGte || op == opGt {
-				v, err := parseWildcardLower(verStr)
+			switch op {
+			case opGte:
+				vLower, err := parseWildcardLower(verStr)
+				if err != nil {
+					return nil, err
+				}
+				return []constraint{{op: opGte, version: vLower}}, nil
+			case opGt:
+				vUpper, _, err := parseWildcardUpper(verStr)
+				if err != nil {
+					return nil, err
+				}
+				return []constraint{{op: opGte, version: vUpper}}, nil
+			case opLte:
+				vUpper, _, err := parseWildcardUpper(verStr)
+				if err != nil {
+					return nil, err
+				}
+				return []constraint{{op: opLt, version: vUpper}}, nil
+			case opLt:
+				vLower, err := parseWildcardLower(verStr)
+				if err != nil {
+					return nil, err
+				}
+				return []constraint{{op: opLt, version: vLower}}, nil
+			case opEq:
+				vLower, err := parseWildcardLower(verStr)
+				if err != nil {
+					return nil, err
+				}
+				vUpper, _, err := parseWildcardUpper(verStr)
+				if err != nil {
+					return nil, err
+				}
+				return []constraint{
+					{op: opGte, version: vLower},
+					{op: opLt, version: vUpper},
+				}, nil
+			default:
+				v, err := Parse(verStr)
 				if err != nil {
 					return nil, err
 				}
 				return []constraint{{op: op, version: v}}, nil
 			}
-			v, _, err := parseWildcardUpper(verStr)
-			if err != nil {
-				return nil, err
-			}
-			return []constraint{{op: opLt, version: v}}, nil
 		}
 		v, err := Parse(verStr)
 		if err != nil {

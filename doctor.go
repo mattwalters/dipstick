@@ -6,13 +6,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mattwalters/dipstick/internal/cliexec"
+	"github.com/mattwalters/dipstick/internal/compat"
 	"github.com/mattwalters/dipstick/internal/localstate"
 	"github.com/mattwalters/dipstick/internal/scrub"
 )
@@ -78,77 +77,27 @@ type DoctorReport struct {
 }
 
 type providerSpec struct {
-	binaryName    string
-	minFloor      string
-	maxVerified   string
-	verifiedRange string
-	envOverrides  []string
+	binaryName   string
+	envOverrides []string
 }
 
 var knownProviderSpecs = map[ProviderID]providerSpec{
 	ProviderClaude: {
-		binaryName:    "claude",
-		minFloor:      "2.1.0",
-		maxVerified:   "2.2.0",
-		verifiedRange: ">=2.1.0 <2.2.0",
-		envOverrides:  []string{"CLAUDE_CONFIG_DIR"},
+		binaryName:   "claude",
+		envOverrides: []string{"CLAUDE_CONFIG_DIR"},
 	},
 	ProviderCodex: {
-		binaryName:    "codex",
-		minFloor:      "0.148.0",
-		maxVerified:   "0.150.0",
-		verifiedRange: ">=0.148.0 <0.150.0",
-		envOverrides:  []string{"CODEX_HOME", "CODEX_CONFIG_DIR"},
+		binaryName:   "codex",
+		envOverrides: []string{"CODEX_HOME", "CODEX_CONFIG_DIR"},
 	},
 	ProviderOpenCode: {
-		binaryName:    "opencode",
-		minFloor:      "1.18.0",
-		maxVerified:   "",
-		verifiedRange: ">=1.18.0",
-		envOverrides:  []string{"OPENCODE_CONFIG_DIR"},
+		binaryName:   "opencode",
+		envOverrides: []string{"OPENCODE_CONFIG_DIR"},
 	},
 	ProviderAntigravity: {
-		binaryName:    "antigravity",
-		minFloor:      "",
-		maxVerified:   "",
-		verifiedRange: "",
-		envOverrides:  []string{"ANTIGRAVITY_CONFIG_DIR"},
+		binaryName:   "antigravity",
+		envOverrides: []string{"ANTIGRAVITY_CONFIG_DIR"},
 	},
-}
-
-type semver struct {
-	major int
-	minor int
-	patch int
-}
-
-var semverRegex = regexp.MustCompile(`(\d+)\.(\d+)(?:\.(\d+))?`)
-
-func parseSemver(v string) (*semver, bool) {
-	m := semverRegex.FindStringSubmatch(v)
-	if m == nil {
-		return nil, false
-	}
-	maj, err1 := strconv.Atoi(m[1])
-	min, err2 := strconv.Atoi(m[2])
-	patch := 0
-	if len(m) > 3 && m[3] != "" {
-		patch, _ = strconv.Atoi(m[3])
-	}
-	if err1 != nil || err2 != nil {
-		return nil, false
-	}
-	return &semver{major: maj, minor: min, patch: patch}, true
-}
-
-func compareSemver(a, b semver) int {
-	if a.major != b.major {
-		return a.major - b.major
-	}
-	if a.minor != b.minor {
-		return a.minor - b.minor
-	}
-	return a.patch - b.patch
 }
 
 // Doctor evaluates provider installations, version compatibility, credential storage,
@@ -277,8 +226,8 @@ func diagnoseProvider(ctx context.Context, pID ProviderID, adp Adapter, cfg *con
 			installed = true
 			binaryPath = resolved
 			if probedVer, pErr := cliexec.ProbeVersion(ctx, spec.binaryName); pErr == nil && probedVer != "" {
-				if parsed := semverRegex.FindString(probedVer); parsed != "" {
-					version = parsed
+				if parsed, err := compat.Extract(probedVer); err == nil {
+					version = parsed.String()
 				} else {
 					version = probedVer
 				}
@@ -286,31 +235,35 @@ func diagnoseProvider(ctx context.Context, pID ProviderID, adp Adapter, cfg *con
 		}
 	}
 
+	var compatRange string
+	if adp != nil {
+		compatRange = adp.Compat().VerifiedRange
+	} else if createAdp, ok := defaultAdapterRegistry[pID]; ok {
+		compatRange = createAdp().Compat().VerifiedRange
+	}
+
 	if !installed {
 		verdict = CompatNotInstalled
-	} else if version != "" && hasSpec && spec.verifiedRange != "" {
-		verdictRange = spec.verifiedRange
-		if parsedVer, ok := parseSemver(version); ok {
-			if spec.minFloor != "" {
-				if minFloor, ok := parseSemver(spec.minFloor); ok {
-					if compareSemver(*parsedVer, *minFloor) < 0 {
-						verdict = CompatOlderThanFloor
-						verdictRange = "<" + spec.minFloor
-					}
-				}
-			}
-			if verdict == "" && spec.maxVerified != "" {
-				if maxVer, ok := parseSemver(spec.maxVerified); ok {
-					if compareSemver(*parsedVer, *maxVer) >= 0 {
-						verdict = CompatNewerThanVerified
-					}
-				}
-			}
-			if verdict == "" {
-				verdict = CompatVerified
-			}
-		} else {
+	} else if version != "" && compatRange != "" && compatRange != "None" && compatRange != "N/A" {
+		verdictRange = compatRange
+		status, err := compat.Check(compatRange, version)
+		if err != nil {
 			verdict = CompatUnknown
+		} else {
+			switch status {
+			case compat.StatusInRange:
+				verdict = CompatVerified
+			case compat.StatusNewerThanVerified:
+				verdict = CompatNewerThanVerified
+			case compat.StatusOlderThanFloor:
+				verdict = CompatOlderThanFloor
+				if strings.HasPrefix(compatRange, ">=") {
+					fields := strings.Fields(compatRange)
+					verdictRange = "<" + strings.TrimPrefix(fields[0], ">=")
+				}
+			default:
+				verdict = CompatUnknown
+			}
 		}
 	} else if installed {
 		verdict = CompatVerified
