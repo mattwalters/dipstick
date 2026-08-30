@@ -2,18 +2,12 @@ package dipstick
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/mattwalters/dipstick/internal/compat"
-)
-
-var (
-	// ErrSourceTimeout is returned when a source fetch or availability check exceeds its allocated timeout.
-	ErrSourceTimeout = errors.New("source fetch timeout")
 )
 
 // ResolverConfig contains configuration parameters for the Resolver engine.
@@ -535,7 +529,23 @@ func lastAttemptedSource(attempts []SourceAttempt) SourceID {
 	return ""
 }
 
-// sortSourcesByTier returns a copy of the sources sorted in ascending order by Tier(), filtering out nil elements.
+func tierRank(tier SourceTier) int {
+	switch tier {
+	case TierAPI:
+		return 1
+	case TierLocalState, TierLocalRPC:
+		return 2
+	case TierTranscripts:
+		return 4
+	case TierCLIScrape:
+		return 5
+	default:
+		return int(tier)
+	}
+}
+
+// sortSourcesByTier returns a copy of the sources sorted by tier rank, preserving adapter-declared
+// order within the same tier category (such as local state vs local RPC), filtering out nil elements.
 func sortSourcesByTier(sources []Source) []Source {
 	if len(sources) == 0 {
 		return sources
@@ -552,7 +562,7 @@ func sortSourcesByTier(sources []Source) []Source {
 	sorted := make([]Source, len(nonNil))
 	copy(sorted, nonNil)
 	sort.SliceStable(sorted, func(i, j int) bool {
-		return sorted[i].Tier() < sorted[j].Tier()
+		return tierRank(sorted[i].Tier()) < tierRank(sorted[j].Tier())
 	})
 	return sorted
 }

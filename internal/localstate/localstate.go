@@ -220,6 +220,7 @@ type CodexPaths struct {
 	HomeDir           string
 	AuthFile          string
 	ConfigFile        string
+	StateFile         string
 	SessionsDir       string
 	HistoryFile       string
 	SQLiteLogsPattern string
@@ -244,6 +245,7 @@ func (r *Resolver) CodexPaths() (*CodexPaths, error) {
 		HomeDir:           homeDir,
 		AuthFile:          filepath.Join(homeDir, "auth.json"),
 		ConfigFile:        filepath.Join(homeDir, "config.toml"),
+		StateFile:         filepath.Join(homeDir, "state_5.sqlite"),
 		SessionsDir:       filepath.Join(homeDir, "sessions"),
 		HistoryFile:       filepath.Join(homeDir, "history.jsonl"),
 		SQLiteLogsPattern: filepath.Join(homeDir, "logs_*.sqlite"),

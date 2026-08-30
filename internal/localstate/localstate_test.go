@@ -210,6 +210,9 @@ func TestResolver_CodexPaths(t *testing.T) {
 		if paths.ConfigFile != filepath.Join(expectedHome, "config.toml") {
 			t.Errorf("ConfigFile: expected %s, got %s", filepath.Join(expectedHome, "config.toml"), paths.ConfigFile)
 		}
+		if paths.StateFile != filepath.Join(expectedHome, "state_5.sqlite") {
+			t.Errorf("StateFile: expected %s, got %s", filepath.Join(expectedHome, "state_5.sqlite"), paths.StateFile)
+		}
 		if paths.SessionsDir != filepath.Join(expectedHome, "sessions") {
 			t.Errorf("SessionsDir: expected %s, got %s", filepath.Join(expectedHome, "sessions"), paths.SessionsDir)
 		}
@@ -237,6 +240,9 @@ func TestResolver_CodexPaths(t *testing.T) {
 		if paths.AuthFile != filepath.Join(custom, "auth.json") {
 			t.Errorf("AuthFile: expected %s, got %s", filepath.Join(custom, "auth.json"), paths.AuthFile)
 		}
+		if paths.StateFile != filepath.Join(custom, "state_5.sqlite") {
+			t.Errorf("StateFile: expected %s, got %s", filepath.Join(custom, "state_5.sqlite"), paths.StateFile)
+		}
 	})
 
 	t.Run("CODEX_CONFIG_DIR fallback override", func(t *testing.T) {
@@ -254,6 +260,9 @@ func TestResolver_CodexPaths(t *testing.T) {
 		}
 		if paths.HomeDir != custom {
 			t.Errorf("HomeDir CODEX_CONFIG_DIR: expected %s, got %s", custom, paths.HomeDir)
+		}
+		if paths.StateFile != filepath.Join(custom, "state_5.sqlite") {
+			t.Errorf("StateFile: expected %s, got %s", filepath.Join(custom, "state_5.sqlite"), paths.StateFile)
 		}
 	})
 }
