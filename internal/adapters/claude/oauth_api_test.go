@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -746,6 +747,7 @@ func TestClaudeAdapter_EndToEnd_ExpiredCredentials(t *testing.T) {
 				ExpiresAt:   &past,
 			}, localstate.ErrCredentialExpired
 		}),
+		claude.WithAdapterProjectsDir(filepath.Join(t.TempDir(), "nonexistent")),
 	)
 
 	report, err := dipstick.Collect(ctx,

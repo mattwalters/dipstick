@@ -20,6 +20,7 @@ type config struct {
 	sourceTimeout time.Duration
 	sourcePolicy  SourcePolicy
 	strict        bool
+	since         time.Time
 	adapters      map[ProviderID]Adapter
 }
 
@@ -61,6 +62,13 @@ func WithStrict(strict bool) Option {
 	}
 }
 
+// WithSince filters data collection (e.g. transcript scanning) to events occurring on or after the specified time.
+func WithSince(t time.Time) Option {
+	return func(c *config) {
+		c.since = t
+	}
+}
+
 // WithAdapter registers or overrides an adapter implementation for a provider.
 func WithAdapter(adapter Adapter) Option {
 	return func(c *config) {
@@ -84,17 +92,21 @@ func Providers() []ProviderID {
 	return list
 }
 
-var defaultAdapterRegistry = map[ProviderID]func() Adapter{
-	ProviderAntigravity: func() Adapter {
+var defaultAdapterRegistry = map[ProviderID]func(*config) Adapter{
+	ProviderAntigravity: func(c *config) Adapter {
 		return antigravity.New()
 	},
-	ProviderClaude: func() Adapter {
-		return claude.New()
+	ProviderClaude: func(c *config) Adapter {
+		var opts []claude.Option
+		if c != nil && !c.since.IsZero() {
+			opts = append(opts, claude.WithAdapterSince(c.since))
+		}
+		return claude.New(opts...)
 	},
-	ProviderCodex: func() Adapter {
+	ProviderCodex: func(c *config) Adapter {
 		return codex.New()
 	},
-	ProviderOpenCode: func() Adapter {
+	ProviderOpenCode: func(c *config) Adapter {
 		return newOpenCodeAdapter()
 	},
 }
@@ -172,7 +184,7 @@ func Collect(ctx context.Context, opts ...Option) (*Report, error) {
 		if custom, ok := cfg.adapters[p]; ok {
 			activeAdapters[p] = custom
 		} else {
-			activeAdapters[p] = defaultAdapterRegistry[p]()
+			activeAdapters[p] = defaultAdapterRegistry[p](cfg)
 		}
 	}
 

@@ -86,8 +86,8 @@ func TestCollect_Default(t *testing.T) {
 			}
 		} else if id == dipstick.ProviderClaude {
 			if inProv {
-				if pr.Source != dipstick.SourceOAuthAPI {
-					t.Errorf("claude provider: expected source %s, got %s", dipstick.SourceOAuthAPI, pr.Source)
+				if pr.Source != dipstick.SourceOAuthAPI && pr.Source != dipstick.SourceTranscript {
+					t.Errorf("claude provider: expected source %s or %s, got %s", dipstick.SourceOAuthAPI, dipstick.SourceTranscript, pr.Source)
 				}
 			}
 		} else if id == dipstick.ProviderOpenCode {

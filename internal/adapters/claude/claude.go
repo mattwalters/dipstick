@@ -50,6 +50,27 @@ func WithAdapterNow(fn func() time.Time) Option {
 	}
 }
 
+// WithAdapterProjectsDir sets the projects directory for Claude local transcript scanning.
+func WithAdapterProjectsDir(dir string) Option {
+	return func(a *Adapter) {
+		a.projectsDir = dir
+	}
+}
+
+// WithAdapterSince sets the time filter threshold for Claude local transcript scanning.
+func WithAdapterSince(t time.Time) Option {
+	return func(a *Adapter) {
+		a.since = t
+	}
+}
+
+// WithAdapterResolver sets the localstate.Resolver for Claude paths.
+func WithAdapterResolver(r *localstate.Resolver) Option {
+	return func(a *Adapter) {
+		a.resolver = r
+	}
+}
+
 // Adapter provides usage collection for the Claude coding agent.
 type Adapter struct {
 	baseURL            string
@@ -57,6 +78,9 @@ type Adapter struct {
 	credentialResolver func(context.Context) (*localstate.ClaudeCredentials, error)
 	runner             *cliexec.Runner
 	now                func() time.Time
+	projectsDir        string
+	since              time.Time
+	resolver           *localstate.Resolver
 }
 
 // New creates a new Claude adapter instance.
@@ -66,6 +90,7 @@ func New(opts ...Option) *Adapter {
 		credentialResolver: localstate.ReadClaudeCredentials,
 		runner:             cliexec.New(),
 		now:                time.Now,
+		resolver:           localstate.New(),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -145,8 +170,16 @@ func (a *Adapter) Sources() []types.Source {
 		}))
 	}
 
+	transcriptOpts := []TranscriptOption{
+		WithProjectsDir(a.projectsDir),
+		WithSince(a.since),
+		WithResolver(a.resolver),
+		WithTranscriptNow(a.now),
+	}
+
 	return []types.Source{
 		NewOAuthAPISource(oauthOpts...),
+		NewTranscriptSource(transcriptOpts...),
 	}
 }
 

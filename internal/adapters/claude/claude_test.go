@@ -3,6 +3,7 @@ package claude_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -22,8 +23,8 @@ func TestAdapter_Interface(t *testing.T) {
 	}
 
 	sources := a.Sources()
-	if len(sources) == 0 {
-		t.Fatalf("expected non-empty source ladder")
+	if len(sources) != 2 {
+		t.Fatalf("expected 2 sources in ladder, got %d", len(sources))
 	}
 
 	primary := sources[0]
@@ -32,6 +33,14 @@ func TestAdapter_Interface(t *testing.T) {
 	}
 	if primary.Tier() != dipstick.TierAPI {
 		t.Errorf("expected primary source tier %v, got %v", dipstick.TierAPI, primary.Tier())
+	}
+
+	secondary := sources[1]
+	if secondary.ID() != dipstick.SourceTranscript {
+		t.Errorf("expected secondary source ID %q, got %q", dipstick.SourceTranscript, secondary.ID())
+	}
+	if secondary.Tier() != dipstick.TierTranscripts {
+		t.Errorf("expected secondary source tier %v, got %v", dipstick.TierTranscripts, secondary.Tier())
 	}
 }
 
@@ -108,4 +117,80 @@ func TestAdapter_Detect(t *testing.T) {
 			t.Errorf("expected context.Canceled error, got %v", err)
 		}
 	})
+}
+
+func TestAdapter_CollectLadderFallback(t *testing.T) {
+	ctx := context.Background()
+	fixturesDir := filepath.Join("testdata", "transcripts")
+
+	// Adapter where OAuth is unauthenticated -> fallback to TranscriptSource
+	a := claude.New(
+		claude.WithAdapterCredentialResolver(func(ctx context.Context) (*localstate.ClaudeCredentials, error) {
+			return nil, localstate.ErrCredentialNotFound
+		}),
+		claude.WithAdapterProjectsDir(fixturesDir),
+	)
+
+	rep, err := dipstick.Collect(ctx, dipstick.WithAdapter(a))
+	if err != nil {
+		t.Fatalf("Collect failed: %v", err)
+	}
+
+	if len(rep.Providers) != 1 {
+		t.Fatalf("expected 1 provider report, got %d", len(rep.Providers))
+	}
+
+	p := rep.Providers[0]
+	if p.Provider != dipstick.ProviderClaude {
+		t.Errorf("expected Provider %q, got %q", dipstick.ProviderClaude, p.Provider)
+	}
+	if p.Source != dipstick.SourceTranscript {
+		t.Errorf("expected Source %q, got %q", dipstick.SourceTranscript, p.Source)
+	}
+	if p.Confidence != dipstick.ConfidenceDerived {
+		t.Errorf("expected Confidence %q, got %q", dipstick.ConfidenceDerived, p.Confidence)
+	}
+	if len(p.Windows) != 0 {
+		t.Errorf("expected empty Windows from transcript fallback, got %d", len(p.Windows))
+	}
+	if p.Tokens == nil || *p.Tokens.TotalTokens != 1795 {
+		t.Errorf("expected TotalTokens = 1795, got %v", p.Tokens)
+	}
+}
+
+func TestAdapter_CollectOfflinePolicy(t *testing.T) {
+	ctx := context.Background()
+	fixturesDir := filepath.Join("testdata", "transcripts")
+	future := time.Now().Add(24 * time.Hour)
+
+	// Even with valid OAuth credentials available, --policy offline should bypass OAuth and use TranscriptSource
+	a := claude.New(
+		claude.WithAdapterCredentialResolver(func(ctx context.Context) (*localstate.ClaudeCredentials, error) {
+			return &localstate.ClaudeCredentials{
+				AccessToken: "sk-ant-test-token",
+				ExpiresAt:   &future,
+			}, nil
+		}),
+		claude.WithAdapterProjectsDir(fixturesDir),
+	)
+
+	rep, err := dipstick.Collect(ctx,
+		dipstick.WithAdapter(a),
+		dipstick.WithSourcePolicy(dipstick.SourcePolicyOffline),
+	)
+	if err != nil {
+		t.Fatalf("Collect failed with offline policy: %v", err)
+	}
+
+	if len(rep.Providers) != 1 {
+		t.Fatalf("expected 1 provider report, got %d", len(rep.Providers))
+	}
+
+	p := rep.Providers[0]
+	if p.Source != dipstick.SourceTranscript {
+		t.Errorf("expected Source %q under offline policy, got %q", dipstick.SourceTranscript, p.Source)
+	}
+	if p.Confidence != dipstick.ConfidenceDerived {
+		t.Errorf("expected Confidence %q, got %q", dipstick.ConfidenceDerived, p.Confidence)
+	}
 }

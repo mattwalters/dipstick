@@ -1,0 +1,2 @@
+{"type":"user","timestamp":"2026-08-20T10:05:00Z","sessionId":"sess-alpha-1","agentId":"sub-1","message":{"role":"user","content":"Subagent prompt"}}
+{"type":"assistant","timestamp":"2026-08-20T10:05:05Z","sessionId":"sess-alpha-1","agentId":"sub-1","message":{"id":"msg-sub1-1","model":"claude-3-5-sonnet","role":"assistant","usage":{"input_tokens":300,"output_tokens":70,"cache_creation_input_tokens":10,"cache_read_input_tokens":40}}}

@@ -75,6 +75,44 @@ func loadGoldenText(t *testing.T, relPath string) string {
 	return string(data)
 }
 
+// newClaudeTranscriptDir builds an isolated CLAUDE_CONFIG_DIR containing a
+// single project transcript, so transcript-tier tests do not depend on whatever
+// Claude state happens to exist on the host running them.
+func newClaudeTranscriptDir(t *testing.T) string {
+	t.Helper()
+	configDir := t.TempDir()
+	projectDir := filepath.Join(configDir, "projects", "project-cli")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("failed creating transcript project dir: %v", err)
+	}
+
+	lines := []string{
+		`{"type":"user","timestamp":"2026-08-20T10:00:00Z","sessionId":"sess-cli-1","message":{"role":"user","content":"Hello world"}}`,
+		`{"type":"assistant","timestamp":"2026-08-20T10:00:05Z","sessionId":"sess-cli-1","message":{"id":"msg-cli-1","model":"claude-3-7-sonnet","role":"assistant","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":20,"cache_read_input_tokens":30}}}`,
+	}
+	transcript := filepath.Join(projectDir, "session-1.jsonl")
+	if err := os.WriteFile(transcript, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("failed writing transcript fixture: %v", err)
+	}
+	return configDir
+}
+
+// envWithClaudeConfigDir returns the current environment with CLAUDE_CONFIG_DIR
+// replaced by dir. Existing entries are dropped rather than shadowed, since
+// duplicate keys in an exec environment resolve inconsistently across platforms.
+func envWithClaudeConfigDir(dir string) []string {
+	const key = "CLAUDE_CONFIG_DIR="
+	base := os.Environ()
+	out := make([]string, 0, len(base)+1)
+	for _, kv := range base {
+		if strings.HasPrefix(kv, key) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, key+dir)
+}
+
 func TestRun_ExitCode0_ProviderReported(t *testing.T) {
 	origCollect := collectFn
 	defer func() { collectFn = origCollect }()
@@ -153,6 +191,21 @@ func TestRun_ExitCode2_BadInvocations(t *testing.T) {
 			name:        "unexpected argument",
 			args:        []string{"extra-arg"},
 			errContains: "unexpected argument",
+		},
+		{
+			name:        "invalid since flag",
+			args:        []string{"--since", "not-a-date"},
+			errContains: "invalid --since value",
+		},
+		{
+			name:        "negative since duration",
+			args:        []string{"--since", "-24h"},
+			errContains: "invalid --since value",
+		},
+		{
+			name:        "doctor invalid since flag",
+			args:        []string{"doctor", "--since", "bad-date"},
+			errContains: "invalid --since value",
 		},
 		{
 			name:        "doctor unknown flag",
@@ -441,6 +494,7 @@ func TestRun_OptionPassing(t *testing.T) {
 		"-p", "codex",
 		"--policy", "local",
 		"--strict",
+		"--since", "24h",
 		"-timeout", "15s",
 		"-source-timeout", "3s",
 	}
@@ -481,6 +535,67 @@ func TestRun_StrictFlag(t *testing.T) {
 
 	if len(receivedOpts) == 0 {
 		t.Fatalf("expected options to be passed to collectFn")
+	}
+}
+
+func TestParseSince(t *testing.T) {
+	refNow := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		input       string
+		expected    time.Time
+		expectError bool
+	}{
+		{
+			input:    "",
+			expected: time.Time{},
+		},
+		{
+			input:    "24h",
+			expected: refNow.Add(-24 * time.Hour),
+		},
+		{
+			input:    "7d",
+			expected: refNow.Add(-7 * 24 * time.Hour),
+		},
+		{
+			input:    "2w",
+			expected: refNow.Add(-14 * 24 * time.Hour),
+		},
+		{
+			input:    "2026-08-20T10:00:00Z",
+			expected: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			input:    "2026-08-20",
+			expected: time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			input:       "-5h",
+			expectError: true,
+		},
+		{
+			input:       "invalid-date",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := parseSince(tt.input, refNow)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error for input %q, got %v", tt.input, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for input %q: %v", tt.input, err)
+			}
+			if !got.Equal(tt.expected) {
+				t.Errorf("parseSince(%q): want %v, got %v", tt.input, tt.expected, got)
+			}
+		})
 	}
 }
 
@@ -714,7 +829,7 @@ func TestSubprocess_ExitCodes(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		cmd := exec.CommandContext(ctx, testBinaryPath, "-p", "claude", "--pretty")
+		cmd := exec.CommandContext(ctx, testBinaryPath, "-p", "antigravity", "--pretty")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -727,8 +842,71 @@ func TestSubprocess_ExitCodes(t *testing.T) {
 		if exitErr.ExitCode() != 1 {
 			t.Errorf("expected exit code 1, got %d", exitErr.ExitCode())
 		}
-		if !strings.Contains(stdout.String(), "claude") {
+		if !strings.Contains(stdout.String(), "antigravity") {
 			t.Errorf("expected stdout to contain provider names in pretty format, got %s", stdout.String())
+		}
+	})
+
+	t.Run("subprocess offline policy transcript collection", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		configDir := newClaudeTranscriptDir(t)
+
+		cmd := exec.CommandContext(ctx, testBinaryPath, "-p", "claude", "--policy", "offline", "--json")
+		cmd.Env = envWithClaudeConfigDir(configDir)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		if err != nil {
+			t.Fatalf("expected exit code 0 on offline claude scan, got %v. stderr: %s", err, stderr.String())
+		}
+
+		var rep dipstick.Report
+		if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+			t.Fatalf("failed unmarshaling report: %v\nstdout: %s", err, stdout.String())
+		}
+
+		if len(rep.Providers) != 1 {
+			t.Fatalf("expected 1 provider in report, got %d", len(rep.Providers))
+		}
+
+		p := rep.Providers[0]
+		if p.Provider != dipstick.ProviderClaude {
+			t.Errorf("Provider: got %q, want claude", p.Provider)
+		}
+		if p.Source != dipstick.SourceTranscript {
+			t.Errorf("Source: got %q, want transcript", p.Source)
+		}
+		if p.Confidence != dipstick.ConfidenceDerived {
+			t.Errorf("Confidence: got %q, want derived", p.Confidence)
+		}
+		if len(p.Windows) != 0 {
+			t.Errorf("Windows: expected empty windows from transcript source, got %d", len(p.Windows))
+		}
+		if p.Tokens == nil {
+			t.Fatalf("Tokens: expected non-nil token usage")
+		}
+
+		// Totals are fixed by the fixture written in newClaudeTranscriptDir.
+		for _, tc := range []struct {
+			name string
+			got  *int64
+			want int64
+		}{
+			{"InputTokens", p.Tokens.InputTokens, 100},
+			{"OutputTokens", p.Tokens.OutputTokens, 50},
+			{"CacheWriteTokens", p.Tokens.CacheWriteTokens, 20},
+			{"CacheReadTokens", p.Tokens.CacheReadTokens, 30},
+		} {
+			if tc.got == nil {
+				t.Errorf("%s: got nil, want %d", tc.name, tc.want)
+				continue
+			}
+			if *tc.got != tc.want {
+				t.Errorf("%s: got %d, want %d", tc.name, *tc.got, tc.want)
+			}
 		}
 	})
 }
