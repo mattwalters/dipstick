@@ -1,0 +1,109 @@
+name: Drift Canary
+
+# =========================================================================================
+# Scheduled Vendor CLI Drift Canary
+#
+# DELIBERATELY UNCREDENTIALED:
+# CI must never hold tokens, real accounts, or perform live quota fetches for any vendor.
+# This workflow performs unauthenticated structural verification only:
+#   - Detects version bumps outside declared compatibility ranges
+#   - Detects CLI command/subcommand surface changes (--help shape)
+#   - Detects breaking RPC protocol schema drift (codex app-server JSON schema)
+#
+# It does NOT detect payload drift (e.g. changed JSON response bodies or token formats),
+# which requires credentials and must be verified by a human running 'make capture' on a
+# real machine.
+#
+# SIGNAL, NOT GATE:
+# Failures or drift alerts here never block release workflows. When drift is detected,
+# this workflow creates or updates a single dedicated GitHub issue.
+# =========================================================================================
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # Daily at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      mock_drift:
+        description: 'Simulate vendor drift for testing issue creation'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  canary:
+    name: Drift Canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          node-version: '22'
+
+      - name: Install latest published vendor CLIs
+        continue-on-error: true
+        run: |
+          echo "Installing latest published vendor CLIs..."
+          npm install -g @anthropic-ai/claude-code@latest || echo "::warning::Failed to install @anthropic-ai/claude-code"
+          npm install -g @openai/codex@latest || echo "::warning::Failed to install @openai/codex"
+          npm install -g opencode@latest || echo "::warning::Failed to install opencode"
+
+      - name: Run drift canary
+        id: run-canary
+        env:
+          MOCK_DRIFT: ${{ inputs.mock_drift }}
+        run: |
+          FLAGS=""
+          if [ "$MOCK_DRIFT" = "true" ]; then
+            FLAGS="-mock-drift"
+          fi
+          go run ./internal/tools/canary -out canary-report.md -json canary-summary.json $FLAGS
+          cat canary-report.md
+
+      - name: Manage GitHub issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DRIFT_DETECTED=$(jq -r '.drift_detected' canary-summary.json)
+          echo "Drift detected: $DRIFT_DETECTED"
+
+          # Ensure canary label exists
+          gh label create "canary" --description "Vendor CLI compatibility drift alert" --color "d93f0b" --force || true
+
+          # Find existing open canary issue
+          EXISTING_ISSUE=$(gh issue list --state open --label "canary" --json number,title --jq '.[] | select(.title | contains("[Canary] Vendor CLI drift detected")) | .number' | head -n 1)
+
+          if [ "$DRIFT_DETECTED" = "true" ]; then
+            if [ -n "$EXISTING_ISSUE" ]; then
+              echo "Updating existing open issue #$EXISTING_ISSUE..."
+              gh issue edit "$EXISTING_ISSUE" --body-file canary-report.md
+            else
+              echo "Opening new drift issue..."
+              gh issue create --title "[Canary] Vendor CLI drift detected" --label "canary" --body-file canary-report.md
+            fi
+          else
+            if [ -n "$EXISTING_ISSUE" ]; then
+              echo "Zero drift detected. Resolving open issue #$EXISTING_ISSUE..."
+              gh issue comment "$EXISTING_ISSUE" --body "Drift canary ran successfully with zero drift detected. Automatically resolving issue."
+              gh issue close "$EXISTING_ISSUE" --reason "completed"
+            else
+              echo "Zero drift detected and no open issue. Everything clean."
+            fi
+          fi
