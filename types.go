@@ -88,6 +88,9 @@ type SourceAttempt = types.SourceAttempt
 // Report is the top-level container for a complete usage collection run.
 type Report = types.Report
 
+// Compat defines the vendor version compatibility declaration for an adapter.
+type Compat = types.Compat
+
 // ProviderReport contains usage, quota, and metadata for a single agent provider.
 type ProviderReport = types.ProviderReport
 

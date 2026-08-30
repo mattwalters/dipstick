@@ -105,6 +105,15 @@ func (a *Adapter) Sources() []types.Source {
 	}
 }
 
+// Compat returns the verified compatibility range declaration for Codex.
+func (a *Adapter) Compat() types.Compat {
+	return types.Compat{
+		VerifiedRange: ">=0.148.0 <0.150.0",
+		LastCheck:     "2026-08-29",
+		Notes:         "Supported",
+	}
+}
+
 var _ types.Source = (*localStateSource)(nil)
 
 type localStateSource struct {

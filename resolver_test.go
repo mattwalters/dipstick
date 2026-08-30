@@ -81,13 +81,22 @@ func totalTokens(pr dipstick.ProviderReport) int64 {
 
 // fakeAdapter is a mock implementation of dipstick.Adapter.
 type fakeAdapter struct {
-	id      dipstick.ProviderID
-	sources []dipstick.Source
+	id        dipstick.ProviderID
+	sources   []dipstick.Source
+	compat    dipstick.Compat
+	detection *dipstick.Detection
+	detectErr error
 }
 
 func (a *fakeAdapter) ID() dipstick.ProviderID { return a.id }
 
 func (a *fakeAdapter) Detect(ctx context.Context) (dipstick.Detection, error) {
+	if a.detectErr != nil {
+		return dipstick.Detection{}, a.detectErr
+	}
+	if a.detection != nil {
+		return *a.detection, nil
+	}
 	return dipstick.Detection{
 		Installed:     true,
 		Authenticated: true,
@@ -96,6 +105,10 @@ func (a *fakeAdapter) Detect(ctx context.Context) (dipstick.Detection, error) {
 
 func (a *fakeAdapter) Sources() []dipstick.Source {
 	return a.sources
+}
+
+func (a *fakeAdapter) Compat() dipstick.Compat {
+	return a.compat
 }
 
 func TestResolver_FirstTierWins(t *testing.T) {
@@ -985,4 +998,278 @@ func TestResolver_SecretScrubbingInResolution(t *testing.T) {
 	if !strings.Contains(pe.Detail, "[REDACTED]") {
 		t.Errorf("pe.Detail expected to contain [REDACTED], got: %s", pe.Detail)
 	}
+}
+
+func TestResolver_Compat_Outcomes(t *testing.T) {
+	t.Run("in_range_normal_confidence", func(t *testing.T) {
+		src := &fakeSource{
+			id:        dipstick.SourceOAuthAPI,
+			tier:      dipstick.TierAPI,
+			available: true,
+			fetchReport: &dipstick.ProviderReport{
+				Tokens: &dipstick.TokenUsage{TotalTokens: dipstick.Ptr(int64(500))},
+			},
+		}
+		adapter := &fakeAdapter{
+			id:      dipstick.ProviderClaude,
+			sources: []dipstick.Source{src},
+			compat: dipstick.Compat{
+				VerifiedRange: ">=2.1.0 <2.2.0",
+				LastCheck:     "2026-08-29",
+			},
+			detection: &dipstick.Detection{
+				Installed:     true,
+				Authenticated: true,
+				Version:       "2.1.4",
+			},
+		}
+
+		resolver := dipstick.NewResolver(map[dipstick.ProviderID]dipstick.Adapter{
+			dipstick.ProviderClaude: adapter,
+		}, dipstick.ResolverConfig{})
+
+		report, err := resolver.Resolve(context.Background(), []dipstick.ProviderID{dipstick.ProviderClaude})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(report.Errors) != 0 {
+			t.Fatalf("unexpected errors: %+v", report.Errors)
+		}
+		pr, ok := findProvider(report, dipstick.ProviderClaude)
+		if !ok {
+			t.Fatalf("missing claude report")
+		}
+		if pr.Confidence != dipstick.ConfidenceExact {
+			t.Errorf("expected ConfidenceExact for in-range version, got %s", pr.Confidence)
+		}
+		if len(pr.Warnings) != 0 {
+			t.Errorf("expected 0 warnings for in-range version, got %v", pr.Warnings)
+		}
+		if pr.CLIVersion != "2.1.4" {
+			t.Errorf("expected CLIVersion 2.1.4, got %s", pr.CLIVersion)
+		}
+	})
+
+	t.Run("newer_than_verified_default_mode", func(t *testing.T) {
+		src := &fakeSource{
+			id:        dipstick.SourceOAuthAPI,
+			tier:      dipstick.TierAPI,
+			available: true,
+			fetchReport: &dipstick.ProviderReport{
+				Tokens: &dipstick.TokenUsage{TotalTokens: dipstick.Ptr(int64(500))},
+			},
+		}
+		adapter := &fakeAdapter{
+			id:      dipstick.ProviderClaude,
+			sources: []dipstick.Source{src},
+			compat: dipstick.Compat{
+				VerifiedRange: ">=2.1.0 <2.2.0",
+				LastCheck:     "2026-08-29",
+			},
+			detection: &dipstick.Detection{
+				Installed:     true,
+				Authenticated: true,
+				Version:       "2.3.0",
+			},
+		}
+
+		resolver := dipstick.NewResolver(map[dipstick.ProviderID]dipstick.Adapter{
+			dipstick.ProviderClaude: adapter,
+		}, dipstick.ResolverConfig{
+			Strict: false,
+		})
+
+		report, err := resolver.Resolve(context.Background(), []dipstick.ProviderID{dipstick.ProviderClaude})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(report.Errors) != 0 {
+			t.Fatalf("unexpected errors: %+v", report.Errors)
+		}
+		pr, ok := findProvider(report, dipstick.ProviderClaude)
+		if !ok {
+			t.Fatalf("missing claude report")
+		}
+		if pr.Confidence != dipstick.ConfidenceUnknown {
+			t.Errorf("expected ConfidenceUnknown for newer version, got %s", pr.Confidence)
+		}
+		if len(pr.Warnings) != 1 {
+			t.Fatalf("expected 1 warning, got %d: %v", len(pr.Warnings), pr.Warnings)
+		}
+		if !strings.Contains(pr.Warnings[0], "2.3.0") || !strings.Contains(pr.Warnings[0], ">=2.1.0 <2.2.0") {
+			t.Errorf("warning did not name observed and verified versions: %s", pr.Warnings[0])
+		}
+	})
+
+	t.Run("newer_than_verified_strict_mode", func(t *testing.T) {
+		src := &fakeSource{
+			id:        dipstick.SourceOAuthAPI,
+			tier:      dipstick.TierAPI,
+			available: true,
+			fetchReport: &dipstick.ProviderReport{
+				Tokens: &dipstick.TokenUsage{TotalTokens: dipstick.Ptr(int64(500))},
+			},
+		}
+		adapter := &fakeAdapter{
+			id:      dipstick.ProviderClaude,
+			sources: []dipstick.Source{src},
+			compat: dipstick.Compat{
+				VerifiedRange: ">=2.1.0 <2.2.0",
+				LastCheck:     "2026-08-29",
+			},
+			detection: &dipstick.Detection{
+				Installed:     true,
+				Authenticated: true,
+				Version:       "2.3.0",
+			},
+		}
+
+		resolver := dipstick.NewResolver(map[dipstick.ProviderID]dipstick.Adapter{
+			dipstick.ProviderClaude: adapter,
+		}, dipstick.ResolverConfig{
+			Strict: true,
+		})
+
+		report, err := resolver.Resolve(context.Background(), []dipstick.ProviderID{dipstick.ProviderClaude})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(report.Providers) != 0 {
+			t.Errorf("expected 0 providers under strict mode, got %d", len(report.Providers))
+		}
+		if len(report.Errors) != 1 {
+			t.Fatalf("expected 1 error under strict mode, got %d", len(report.Errors))
+		}
+		pe := report.Errors[0]
+		if pe.Reason != dipstick.ReasonUnsupportedVersion {
+			t.Errorf("expected ReasonUnsupportedVersion, got %s", pe.Reason)
+		}
+		if pe.Retryable {
+			t.Errorf("unsupported_version error should not be retryable")
+		}
+		if !strings.Contains(pe.Detail, "strict mode") {
+			t.Errorf("expected detail to mention strict mode: %s", pe.Detail)
+		}
+	})
+
+	t.Run("older_than_floor_aborts_before_fetch", func(t *testing.T) {
+		src := &fakeSource{
+			id:        dipstick.SourceOAuthAPI,
+			tier:      dipstick.TierAPI,
+			available: true,
+			fetchReport: &dipstick.ProviderReport{
+				Tokens: &dipstick.TokenUsage{TotalTokens: dipstick.Ptr(int64(500))},
+			},
+		}
+		adapter := &fakeAdapter{
+			id:      dipstick.ProviderClaude,
+			sources: []dipstick.Source{src},
+			compat: dipstick.Compat{
+				VerifiedRange: ">=2.1.0 <2.2.0",
+				LastCheck:     "2026-08-29",
+			},
+			detection: &dipstick.Detection{
+				Installed:     true,
+				Authenticated: true,
+				Version:       "2.0.5",
+			},
+		}
+
+		resolver := dipstick.NewResolver(map[dipstick.ProviderID]dipstick.Adapter{
+			dipstick.ProviderClaude: adapter,
+		}, dipstick.ResolverConfig{})
+
+		report, err := resolver.Resolve(context.Background(), []dipstick.ProviderID{dipstick.ProviderClaude})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(report.Providers) != 0 {
+			t.Errorf("expected 0 providers for older version, got %d", len(report.Providers))
+		}
+		if len(report.Errors) != 1 {
+			t.Fatalf("expected 1 error, got %d", len(report.Errors))
+		}
+		pe := report.Errors[0]
+		if pe.Reason != dipstick.ReasonUnsupportedVersion {
+			t.Errorf("expected ReasonUnsupportedVersion, got %s", pe.Reason)
+		}
+		if pe.Retryable {
+			t.Errorf("older version should not be retryable")
+		}
+		if !strings.Contains(pe.Detail, "older than supported floor") {
+			t.Errorf("expected detail to mention older than supported floor: %s", pe.Detail)
+		}
+		// Verify source fetch was aborted before running
+		if atomic.LoadInt32(&src.fetchCalls) != 0 {
+			t.Errorf("source fetch should not have been called when version is older than floor")
+		}
+	})
+
+	t.Run("source_report_populates_version_and_detects_drift", func(t *testing.T) {
+		src := &fakeSource{
+			id:        dipstick.SourceLocalState,
+			tier:      dipstick.TierLocalState,
+			available: true,
+			fetchReport: &dipstick.ProviderReport{
+				CLIVersion: "0.155.0",
+				Tokens:     &dipstick.TokenUsage{TotalTokens: dipstick.Ptr(int64(300))},
+			},
+		}
+		adapter := &fakeAdapter{
+			id:      dipstick.ProviderCodex,
+			sources: []dipstick.Source{src},
+			compat: dipstick.Compat{
+				VerifiedRange: ">=0.148.0 <0.150.0",
+				LastCheck:     "2026-08-29",
+			},
+			detection: &dipstick.Detection{
+				Installed:     true,
+				Authenticated: true,
+				Version:       "", // version not available during initial detect
+			},
+		}
+
+		// Non-strict mode
+		resolver := dipstick.NewResolver(map[dipstick.ProviderID]dipstick.Adapter{
+			dipstick.ProviderCodex: adapter,
+		}, dipstick.ResolverConfig{Strict: false})
+
+		report, err := resolver.Resolve(context.Background(), []dipstick.ProviderID{dipstick.ProviderCodex})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		pr, ok := findProvider(report, dipstick.ProviderCodex)
+		if !ok {
+			t.Fatalf("missing codex report")
+		}
+		if pr.Confidence != dipstick.ConfidenceUnknown {
+			t.Errorf("expected ConfidenceUnknown, got %s", pr.Confidence)
+		}
+		if len(pr.Warnings) != 1 {
+			t.Fatalf("expected 1 warning, got %d", len(pr.Warnings))
+		}
+
+		// Strict mode
+		resolverStrict := dipstick.NewResolver(map[dipstick.ProviderID]dipstick.Adapter{
+			dipstick.ProviderCodex: adapter,
+		}, dipstick.ResolverConfig{Strict: true})
+
+		reportStrict, err := resolverStrict.Resolve(context.Background(), []dipstick.ProviderID{dipstick.ProviderCodex})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(reportStrict.Providers) != 0 {
+			t.Errorf("expected 0 providers in strict mode, got %d", len(reportStrict.Providers))
+		}
+		if len(reportStrict.Errors) != 1 {
+			t.Fatalf("expected 1 error in strict mode, got %d", len(reportStrict.Errors))
+		}
+		if reportStrict.Errors[0].Reason != dipstick.ReasonUnsupportedVersion {
+			t.Errorf("expected ReasonUnsupportedVersion, got %s", reportStrict.Errors[0].Reason)
+		}
+	})
 }

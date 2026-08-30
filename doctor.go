@@ -88,23 +88,23 @@ type providerSpec struct {
 var knownProviderSpecs = map[ProviderID]providerSpec{
 	ProviderClaude: {
 		binaryName:    "claude",
-		minFloor:      "2.0.0",
+		minFloor:      "2.1.0",
 		maxVerified:   "2.2.0",
-		verifiedRange: ">=2.0.0 <2.2.0",
+		verifiedRange: ">=2.1.0 <2.2.0",
 		envOverrides:  []string{"CLAUDE_CONFIG_DIR"},
 	},
 	ProviderCodex: {
 		binaryName:    "codex",
-		minFloor:      "0.140.0",
-		maxVerified:   "0.145.0",
-		verifiedRange: ">=0.140 <0.145",
+		minFloor:      "0.148.0",
+		maxVerified:   "0.150.0",
+		verifiedRange: ">=0.148.0 <0.150.0",
 		envOverrides:  []string{"CODEX_HOME", "CODEX_CONFIG_DIR"},
 	},
 	ProviderOpenCode: {
 		binaryName:    "opencode",
-		minFloor:      "0.1.0",
-		maxVerified:   "1.0.0",
-		verifiedRange: ">=0.1.0 <1.0.0",
+		minFloor:      "1.18.0",
+		maxVerified:   "",
+		verifiedRange: ">=1.18.0",
 		envOverrides:  []string{"OPENCODE_CONFIG_DIR"},
 	},
 	ProviderAntigravity: {

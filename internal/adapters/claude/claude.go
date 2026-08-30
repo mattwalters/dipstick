@@ -149,3 +149,12 @@ func (a *Adapter) Sources() []types.Source {
 		NewOAuthAPISource(oauthOpts...),
 	}
 }
+
+// Compat returns the verified compatibility range declaration for Claude.
+func (a *Adapter) Compat() types.Compat {
+	return types.Compat{
+		VerifiedRange: ">=2.1.0 <2.2.0",
+		LastCheck:     "2026-08-29",
+		Notes:         "Supported",
+	}
+}

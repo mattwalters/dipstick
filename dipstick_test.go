@@ -3,13 +3,18 @@ package dipstick_test
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
 	"github.com/mattwalters/dipstick"
+	"github.com/mattwalters/dipstick/internal/adapters/claude"
+	"github.com/mattwalters/dipstick/internal/adapters/codex"
+	"github.com/mattwalters/dipstick/internal/adapters/opencode"
 )
 
 // findError returns the ProviderError recorded for id, if any.
@@ -303,5 +308,75 @@ func TestCollect_OpenCode(t *testing.T) {
 		if pr.Tokens == nil {
 			t.Errorf("expected non-nil Tokens")
 		}
+	}
+}
+
+func TestCollect_SchemaValidation_WithWarnings(t *testing.T) {
+	schemaPath := filepath.Join("schema", "dipstick.v1.json")
+	compiler := jsonschema.NewCompiler()
+	compiler.Draft = jsonschema.Draft2020
+	schema, err := compiler.Compile(schemaPath)
+	if err != nil {
+		t.Fatalf("failed compiling schema %s: %v", schemaPath, err)
+	}
+
+	report := &dipstick.Report{
+		SchemaVersion: dipstick.SchemaVersion,
+		GeneratedAt:   time.Now().UTC(),
+		Providers: []dipstick.ProviderReport{
+			{
+				Provider:   dipstick.ProviderClaude,
+				Source:     dipstick.SourceOAuthAPI,
+				Confidence: dipstick.ConfidenceUnknown,
+				CLIVersion: "2.3.0",
+				Warnings:   []string{"installed version 2.3.0 is newer than verified range >=2.1.0 <2.2.0"},
+				ObservedAt: time.Now().UTC(),
+			},
+		},
+		Errors: []dipstick.ProviderError{
+			{
+				Provider:  dipstick.ProviderCodex,
+				Reason:    dipstick.ReasonUnsupportedVersion,
+				Detail:    "strict mode: version 0.155.0 is newer than verified range >=0.148.0 <0.150.0",
+				Retryable: false,
+			},
+		},
+	}
+
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("failed marshalling report: %v", err)
+	}
+
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		t.Fatalf("failed unmarshalling report: %v", err)
+	}
+
+	if err := schema.Validate(v); err != nil {
+		t.Errorf("Report with warnings and confidence:unknown failed schema validation: %v\nreport: %s", err, string(data))
+	}
+}
+
+func TestReadme_CompatibilityMatrix(t *testing.T) {
+	readmePath := "README.md"
+	data, err := os.ReadFile(readmePath)
+	if err != nil {
+		t.Fatalf("failed reading %s: %v", readmePath, err)
+	}
+
+	content := string(data)
+	claudeCompat := claude.New().Compat()
+	codexCompat := codex.New().Compat()
+	opencodeCompat := opencode.New().Compat()
+
+	if !strings.Contains(content, claudeCompat.VerifiedRange) {
+		t.Errorf("README.md missing Claude verified range %q", claudeCompat.VerifiedRange)
+	}
+	if !strings.Contains(content, codexCompat.VerifiedRange) {
+		t.Errorf("README.md missing Codex verified range %q", codexCompat.VerifiedRange)
+	}
+	if !strings.Contains(content, opencodeCompat.VerifiedRange) {
+		t.Errorf("README.md missing OpenCode verified range %q", opencodeCompat.VerifiedRange)
 	}
 }

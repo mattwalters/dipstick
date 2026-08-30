@@ -459,6 +459,31 @@ func TestRun_OptionPassing(t *testing.T) {
 	}
 }
 
+func TestRun_StrictFlag(t *testing.T) {
+	origCollect := collectFn
+	defer func() { collectFn = origCollect }()
+
+	var receivedOpts []dipstick.Option
+	collectFn = func(ctx context.Context, opts ...dipstick.Option) (*dipstick.Report, error) {
+		receivedOpts = opts
+		return &dipstick.Report{
+			SchemaVersion: dipstick.SchemaVersion,
+			GeneratedAt:   time.Now().UTC(),
+			Providers:     []dipstick.ProviderReport{},
+		}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--strict", "--json"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+
+	if len(receivedOpts) == 0 {
+		t.Fatalf("expected options to be passed to collectFn")
+	}
+}
+
 // Subprocess execution tests using compiled binary
 
 func TestSubprocess_SchemaValidation(t *testing.T) {

@@ -49,6 +49,7 @@ type Adapter interface {
 	ID() ProviderID
 	Detect(ctx context.Context) (Detection, error)
 	Sources() []Source
+	Compat() Compat
 }
 
 // Source defines a single data collection strategy within an adapter's source ladder.

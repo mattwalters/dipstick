@@ -241,9 +241,9 @@ The table below is auto-generated from in-tree compatibility declarations.
 <!-- BEGIN SUPPORT MATRIX -->
 | Vendor | Provider ID | Verified Versions | Supported Sources / Tiers | Status & Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **Claude Code** (Anthropic) | `claude` | `v0.2.x` – `v0.3.x` | Tier 1 (`oauth_api`), Tier 2 (`local_state`), Tier 4 (`transcripts`) | Supported |
-| **OpenAI Codex** | `codex` | `v0.1.x` – `v0.2.x` | Tier 1 (`oauth_api`), Tier 3 (`local_rpc`), Tier 4 (`transcripts`) | Supported |
-| **OpenCode** (`anomalyco/opencode`) | `opencode` | `v1.18.x`+ | Tier 2 (`local_state`), Tier 3 (`local_rpc`), Tier 5 (`cli_stdout`) | Supported via local SQLite (`opencode.db`) |
+| **Claude Code** (Anthropic) | `claude` | `>=2.1.0 <2.2.0` | Tier 1 (`oauth_api`) | Supported |
+| **OpenAI Codex** | `codex` | `>=0.148.0 <0.150.0` | Tier 2 (`local_state`) | Supported |
+| **OpenCode** (`anomalyco/opencode`) | `opencode` | `>=1.18.0` | Tier 2 (`local_state`), Tier 3 (`local_rpc`), Tier 5 (`cli_stdout`) | Supported via local SQLite (opencode.db) |
 | **Google Antigravity** | `antigravity` | None (`N/A`) | None (`ReasonNotSupported`) | Exposes no token usage API; cookie extraction prohibited |
 <!-- END SUPPORT MATRIX -->
 

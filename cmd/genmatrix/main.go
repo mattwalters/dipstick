@@ -7,6 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mattwalters/dipstick/internal/adapters/antigravity"
+	"github.com/mattwalters/dipstick/internal/adapters/claude"
+	"github.com/mattwalters/dipstick/internal/adapters/codex"
+	"github.com/mattwalters/dipstick/internal/adapters/opencode"
 )
 
 // ProviderCompat represents the compatibility declaration for a provider.
@@ -18,41 +23,60 @@ type ProviderCompat struct {
 	StatusNotes     string
 }
 
-// DefaultMatrix contains the declared compatibility metadata across providers.
-var DefaultMatrix = []ProviderCompat{
-	{
-		Vendor:          "**Claude Code** (Anthropic)",
-		ProviderID:      "`claude`",
-		VerifiedVersion: "`v0.2.x` – `v0.3.x`",
-		SupportedTiers:  "Tier 1 (`oauth_api`), Tier 2 (`local_state`), Tier 4 (`transcripts`)",
-		StatusNotes:     "Supported",
-	},
-	{
-		Vendor:          "**OpenAI Codex**",
-		ProviderID:      "`codex`",
-		VerifiedVersion: "`v0.1.x` – `v0.2.x`",
-		SupportedTiers:  "Tier 1 (`oauth_api`), Tier 3 (`local_rpc`), Tier 4 (`transcripts`)",
-		StatusNotes:     "Supported",
-	},
-	{
-		Vendor:          "**OpenCode** (`anomalyco/opencode`)",
-		ProviderID:      "`opencode`",
-		VerifiedVersion: "`v1.18.x`+",
-		SupportedTiers:  "Tier 2 (`local_state`), Tier 3 (`local_rpc`), Tier 5 (`cli_stdout`)",
-		StatusNotes:     "Supported via local SQLite (`opencode.db`)",
-	},
-	{
-		Vendor:          "**Google Antigravity**",
-		ProviderID:      "`antigravity`",
-		VerifiedVersion: "None (`N/A`)",
-		SupportedTiers:  "None (`ReasonNotSupported`)",
-		StatusNotes:     "Exposes no token usage API; cookie extraction prohibited",
-	},
+// BuildMatrix constructs the compatibility table from adapter declarations.
+func BuildMatrix() []ProviderCompat {
+	claudeAdp := claude.New()
+	codexAdp := codex.New()
+	openCodeAdp := opencode.New()
+	antigravityAdp := antigravity.New()
+
+	return []ProviderCompat{
+		{
+			Vendor:          "**Claude Code** (Anthropic)",
+			ProviderID:      "`claude`",
+			VerifiedVersion: formatVerifiedVersion(claudeAdp.Compat().VerifiedRange),
+			SupportedTiers:  "Tier 1 (`oauth_api`)",
+			StatusNotes:     claudeAdp.Compat().Notes,
+		},
+		{
+			Vendor:          "**OpenAI Codex**",
+			ProviderID:      "`codex`",
+			VerifiedVersion: formatVerifiedVersion(codexAdp.Compat().VerifiedRange),
+			SupportedTiers:  "Tier 2 (`local_state`)",
+			StatusNotes:     codexAdp.Compat().Notes,
+		},
+		{
+			Vendor:          "**OpenCode** (`anomalyco/opencode`)",
+			ProviderID:      "`opencode`",
+			VerifiedVersion: formatVerifiedVersion(openCodeAdp.Compat().VerifiedRange),
+			SupportedTiers:  "Tier 2 (`local_state`), Tier 3 (`local_rpc`), Tier 5 (`cli_stdout`)",
+			StatusNotes:     openCodeAdp.Compat().Notes,
+		},
+		{
+			Vendor:          "**Google Antigravity**",
+			ProviderID:      "`antigravity`",
+			VerifiedVersion: formatVerifiedVersion(antigravityAdp.Compat().VerifiedRange),
+			SupportedTiers:  "None (`ReasonNotSupported`)",
+			StatusNotes:     antigravityAdp.Compat().Notes,
+		},
+	}
 }
 
+func formatVerifiedVersion(v string) string {
+	if v == "" || v == "None" || v == "N/A" {
+		return "None (`N/A`)"
+	}
+	return fmt.Sprintf("`%s`", v)
+}
+
+// DefaultMatrix contains the declared compatibility metadata across providers.
+var DefaultMatrix = BuildMatrix()
+
 const (
-	matrixStartMarker = "<!-- BEGIN SUPPORT MATRIX -->"
-	matrixEndMarker   = "<!-- END SUPPORT MATRIX -->"
+	matrixStartMarkerLegacy = "<!-- BEGIN SUPPORT MATRIX -->"
+	matrixEndMarkerLegacy   = "<!-- END SUPPORT MATRIX -->"
+	matrixStartMarkerCompat = "<!-- COMPAT_MATRIX_START -->"
+	matrixEndMarkerCompat   = "<!-- COMPAT_MATRIX_END -->"
 )
 
 // GenerateMatrixTable renders the markdown table from provider declarations.
@@ -68,29 +92,37 @@ func GenerateMatrixTable(matrix []ProviderCompat) string {
 }
 
 // GenerateFullSection renders the matrix enclosed by marker tags.
-func GenerateFullSection(matrix []ProviderCompat) string {
+func GenerateFullSection(matrix []ProviderCompat, startMarker, endMarker string) string {
 	table := GenerateMatrixTable(matrix)
-	return fmt.Sprintf("%s\n%s%s", matrixStartMarker, table, matrixEndMarker)
+	return fmt.Sprintf("%s\n%s%s", startMarker, table, endMarker)
 }
 
 // UpdateReadmeContent replaces the support matrix section in readme content.
 func UpdateReadmeContent(content string, matrix []ProviderCompat) (string, error) {
-	startIdx := strings.Index(content, matrixStartMarker)
-	if startIdx == -1 {
-		return "", fmt.Errorf("missing start marker %q", matrixStartMarker)
+	startMarker := matrixStartMarkerLegacy
+	endMarker := matrixEndMarkerLegacy
+
+	if strings.Contains(content, matrixStartMarkerCompat) {
+		startMarker = matrixStartMarkerCompat
+		endMarker = matrixEndMarkerCompat
 	}
 
-	endIdx := strings.Index(content, matrixEndMarker)
-	if endIdx == -1 {
-		return "", fmt.Errorf("missing end marker %q", matrixEndMarker)
+	startIdx := strings.Index(content, startMarker)
+	if startIdx == -1 {
+		return "", fmt.Errorf("missing start marker %q", startMarker)
 	}
-	endIdx += len(matrixEndMarker)
+
+	endIdx := strings.Index(content, endMarker)
+	if endIdx == -1 {
+		return "", fmt.Errorf("missing end marker %q", endMarker)
+	}
+	endIdx += len(endMarker)
 
 	if startIdx >= endIdx {
 		return "", fmt.Errorf("invalid marker positions: start %d >= end %d", startIdx, endIdx)
 	}
 
-	replacement := GenerateFullSection(matrix)
+	replacement := GenerateFullSection(matrix, startMarker, endMarker)
 	newContent := content[:startIdx] + replacement + content[endIdx:]
 	return newContent, nil
 }
@@ -102,7 +134,7 @@ func main() {
 	flag.Parse()
 
 	if *stdoutOnly {
-		fmt.Print(GenerateFullSection(DefaultMatrix))
+		fmt.Print(GenerateFullSection(DefaultMatrix, matrixStartMarkerLegacy, matrixEndMarkerLegacy))
 		return
 	}
 

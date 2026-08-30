@@ -84,35 +84,9 @@ func Providers() []ProviderID {
 	return list
 }
 
-// defaultAdapter is a provider whose source ladder has not been built yet.
-//
-// It deliberately declares no sources. A stub source that reported itself
-// available and returned an empty report would land in Report.Providers
-// claiming a source and a confidence — "these numbers came from the vendor's
-// API, exactly" — for numbers nobody collected, which is the one thing the
-// dipstick.v1 contract exists to make unsayable. With an empty ladder the
-// resolver exhausts immediately and the provider is reported as an error,
-// which is true and is what Collect already does today.
-//
-// Each real ladder arrives with its provider's own ticket. Until then the
-// resolver is exercised by the fake adapters in resolver_test.go and by any
-// caller passing WithAdapter.
-type defaultAdapter struct {
-	id ProviderID
-}
-
-func (d *defaultAdapter) ID() ProviderID { return d.id }
-
-func (d *defaultAdapter) Detect(ctx context.Context) (Detection, error) {
-	return Detection{}, nil
-}
-
-func (d *defaultAdapter) Sources() []Source { return nil }
-
 var defaultAdapterRegistry = map[ProviderID]func() Adapter{
 	ProviderAntigravity: func() Adapter {
-		_ = antigravity.New()
-		return &defaultAdapter{id: ProviderAntigravity}
+		return antigravity.New()
 	},
 	ProviderClaude: func() Adapter {
 		return claude.New()

@@ -7,6 +7,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/mattwalters/dipstick/internal/compat"
 )
 
 var (
@@ -152,6 +154,44 @@ func (r *Resolver) Resolve(ctx context.Context, providerIDs []ProviderID) (*Repo
 func (r *Resolver) resolveAdapter(ctx context.Context, adapter Adapter) (*ProviderReport, *ProviderError) {
 	if ctx.Err() != nil {
 		return nil, nil
+	}
+
+	// 1. Detect adapter state and evaluate version compatibility
+	var det Detection
+	if detRes, err := adapter.Detect(ctx); err == nil {
+		det = detRes
+	}
+	compatDecl := adapter.Compat()
+
+	var (
+		driftDetected bool
+		driftWarning  string
+	)
+
+	if det.Version != "" && compatDecl.VerifiedRange != "" {
+		status, err := compat.Check(compatDecl.VerifiedRange, det.Version)
+		if err == nil {
+			switch status {
+			case compat.StatusOlderThanFloor:
+				return nil, &ProviderError{
+					Provider:  adapter.ID(),
+					Reason:    ReasonUnsupportedVersion,
+					Detail:    fmt.Sprintf("installed version %s is older than supported floor %s", det.Version, compatDecl.VerifiedRange),
+					Retryable: false,
+				}
+			case compat.StatusNewerThanVerified:
+				if r.strict {
+					return nil, &ProviderError{
+						Provider:  adapter.ID(),
+						Reason:    ReasonUnsupportedVersion,
+						Detail:    fmt.Sprintf("strict mode: version %s is newer than verified range %s", det.Version, compatDecl.VerifiedRange),
+						Retryable: false,
+					}
+				}
+				driftDetected = true
+				driftWarning = compat.FormatWarning(det.Version, compatDecl.VerifiedRange, compatDecl.LastCheck)
+			}
+		}
 	}
 
 	sources := sortSourcesByTier(adapter.Sources())
@@ -311,6 +351,65 @@ func (r *Resolver) resolveAdapter(ctx context.Context, adapter Adapter) (*Provid
 		if final.ObservedAt.IsZero() {
 			final.ObservedAt = time.Now().UTC()
 		}
+		if final.CLIVersion == "" && det.Version != "" {
+			final.CLIVersion = det.Version
+		}
+
+		// If version was not detected earlier but populated on report by source, evaluate drift
+		if !driftDetected && final.CLIVersion != "" && compatDecl.VerifiedRange != "" {
+			status, err := compat.Check(compatDecl.VerifiedRange, final.CLIVersion)
+			if err == nil {
+				switch status {
+				case compat.StatusOlderThanFloor:
+					return nil, &ProviderError{
+						Provider:  adapter.ID(),
+						Reason:    ReasonUnsupportedVersion,
+						Detail:    fmt.Sprintf("installed version %s is older than supported floor %s", final.CLIVersion, compatDecl.VerifiedRange),
+						Retryable: false,
+						Attempts:  attempts,
+					}
+				case compat.StatusNewerThanVerified:
+					if r.strict {
+						return nil, &ProviderError{
+							Provider:  adapter.ID(),
+							Reason:    ReasonUnsupportedVersion,
+							Detail:    fmt.Sprintf("strict mode: version %s is newer than verified range %s", final.CLIVersion, compatDecl.VerifiedRange),
+							Retryable: false,
+							Attempts:  attempts,
+						}
+					}
+					driftDetected = true
+					driftWarning = compat.FormatWarning(final.CLIVersion, compatDecl.VerifiedRange, compatDecl.LastCheck)
+				}
+			}
+		}
+
+		if driftDetected {
+			final.Confidence = ConfidenceUnknown
+			if driftWarning != "" {
+				hasWarn := false
+				for _, w := range final.Warnings {
+					if w == driftWarning {
+						hasWarn = true
+						break
+					}
+				}
+				if !hasWarn {
+					final.Warnings = append(final.Warnings, driftWarning)
+				}
+			}
+		}
+
+		if r.strict && len(final.Warnings) > 0 {
+			return nil, &ProviderError{
+				Provider:  adapter.ID(),
+				Reason:    ReasonUnsupportedVersion,
+				Detail:    fmt.Sprintf("strict mode: %s", final.Warnings[0]),
+				Retryable: false,
+				Attempts:  attempts,
+			}
+		}
+
 		final.Attempts = attempts
 
 		return &final, nil
