@@ -75,6 +75,44 @@ func loadGoldenText(t *testing.T, relPath string) string {
 	return string(data)
 }
 
+// newClaudeTranscriptDir builds an isolated CLAUDE_CONFIG_DIR containing a
+// single project transcript, so transcript-tier tests do not depend on whatever
+// Claude state happens to exist on the host running them.
+func newClaudeTranscriptDir(t *testing.T) string {
+	t.Helper()
+	configDir := t.TempDir()
+	projectDir := filepath.Join(configDir, "projects", "project-cli")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("failed creating transcript project dir: %v", err)
+	}
+
+	lines := []string{
+		`{"type":"user","timestamp":"2026-08-20T10:00:00Z","sessionId":"sess-cli-1","message":{"role":"user","content":"Hello world"}}`,
+		`{"type":"assistant","timestamp":"2026-08-20T10:00:05Z","sessionId":"sess-cli-1","message":{"id":"msg-cli-1","model":"claude-3-7-sonnet","role":"assistant","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":20,"cache_read_input_tokens":30}}}`,
+	}
+	transcript := filepath.Join(projectDir, "session-1.jsonl")
+	if err := os.WriteFile(transcript, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("failed writing transcript fixture: %v", err)
+	}
+	return configDir
+}
+
+// envWithClaudeConfigDir returns the current environment with CLAUDE_CONFIG_DIR
+// replaced by dir. Existing entries are dropped rather than shadowed, since
+// duplicate keys in an exec environment resolve inconsistently across platforms.
+func envWithClaudeConfigDir(dir string) []string {
+	const key = "CLAUDE_CONFIG_DIR="
+	base := os.Environ()
+	out := make([]string, 0, len(base)+1)
+	for _, kv := range base {
+		if strings.HasPrefix(kv, key) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, key+dir)
+}
+
 func TestRun_ExitCode0_ProviderReported(t *testing.T) {
 	origCollect := collectFn
 	defer func() { collectFn = origCollect }()
@@ -813,7 +851,10 @@ func TestSubprocess_ExitCodes(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
+		configDir := newClaudeTranscriptDir(t)
+
 		cmd := exec.CommandContext(ctx, testBinaryPath, "-p", "claude", "--policy", "offline", "--json")
+		cmd.Env = envWithClaudeConfigDir(configDir)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -846,6 +887,26 @@ func TestSubprocess_ExitCodes(t *testing.T) {
 		}
 		if p.Tokens == nil {
 			t.Fatalf("Tokens: expected non-nil token usage")
+		}
+
+		// Totals are fixed by the fixture written in newClaudeTranscriptDir.
+		for _, tc := range []struct {
+			name string
+			got  *int64
+			want int64
+		}{
+			{"InputTokens", p.Tokens.InputTokens, 100},
+			{"OutputTokens", p.Tokens.OutputTokens, 50},
+			{"CacheWriteTokens", p.Tokens.CacheWriteTokens, 20},
+			{"CacheReadTokens", p.Tokens.CacheReadTokens, 30},
+		} {
+			if tc.got == nil {
+				t.Errorf("%s: got nil, want %d", tc.name, tc.want)
+				continue
+			}
+			if *tc.got != tc.want {
+				t.Errorf("%s: got %d, want %d", tc.name, *tc.got, tc.want)
+			}
 		}
 	})
 }
