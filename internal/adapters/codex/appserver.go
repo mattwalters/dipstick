@@ -44,11 +44,28 @@ func (f AppServerRunnerFunc) Start(ctx context.Context) (io.ReadWriteCloser, err
 	return f(ctx)
 }
 
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *safeBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *safeBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
 type processTransport struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
-	stderr *bytes.Buffer
+	stderr *safeBuffer
 	mu     sync.Mutex
 	closed bool
 }
@@ -62,8 +79,6 @@ func (p *processTransport) Write(b []byte) (int, error) {
 }
 
 func (p *processTransport) Stderr() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.stderr == nil {
 		return ""
 	}
@@ -120,7 +135,7 @@ func defaultAppServerRunner(binaryName string) AppServerRunner {
 		}
 		cmd.WaitDelay = 500 * time.Millisecond
 
-		var stderrBuf bytes.Buffer
+		var stderrBuf safeBuffer
 		cmd.Stderr = &stderrBuf
 
 		stdin, err := cmd.StdinPipe()

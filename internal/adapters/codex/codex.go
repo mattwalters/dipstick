@@ -311,11 +311,17 @@ func (s *appServerSource) Fetch(ctx context.Context) (*types.ProviderReport, err
 		}
 	}
 
-	if accountRes != nil && accountRes.Account.Email != "" {
-		identity.Email = accountRes.Account.Email
+	if accountRes != nil {
+		if accountRes.Account.Email != "" {
+			identity.Email = accountRes.Account.Email
+		}
 		if identity.Plan == "" && accountRes.Account.PlanType != "" {
 			identity.Plan = accountRes.Account.PlanType
 		}
+	}
+
+	if identity.Email == "" && identity.Plan == "" && identity.AccountID == "" && identity.Organization == "" {
+		identity = nil
 	}
 
 	nowFn := time.Now

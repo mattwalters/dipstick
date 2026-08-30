@@ -426,6 +426,80 @@ func TestAppServerSource_ErrorHandling(t *testing.T) {
 			t.Errorf("expected stderr diagnostics in error message, got: %v", err)
 		}
 	})
+
+	t.Run("plan populated when email omitted", func(t *testing.T) {
+		runner := createMockAppServerRunner(func(reqMethod string, reqID int64, params json.RawMessage) (any, *mockRPCError) {
+			switch reqMethod {
+			case "initialize":
+				return map[string]any{"userAgent": "dipstick/test"}, nil
+			case "account/rateLimits/read":
+				return map[string]any{"rateLimits": map[string]any{"limitId": "codex"}}, nil
+			case "account/usage/read":
+				return map[string]any{"summary": map[string]any{"lifetimeTokens": 100}}, nil
+			case "account/read":
+				return map[string]any{
+					"account": map[string]any{
+						"type":     "chatgpt",
+						"email":    "",
+						"planType": "team",
+					},
+				}, nil
+			default:
+				return nil, &mockRPCError{Code: -32601, Message: "not found"}
+			}
+		})
+
+		adapter := codex.New(codex.WithAppServerRunner(runner))
+		src := adapter.Sources()[0]
+
+		report, err := src.Fetch(context.Background())
+		if err != nil {
+			t.Fatalf("Fetch failed: %v", err)
+		}
+		if report.Identity == nil {
+			t.Fatalf("expected non-nil Identity when planType is present")
+		}
+		if report.Identity.Plan != "team" {
+			t.Errorf("expected plan team, got %q", report.Identity.Plan)
+		}
+		if report.Identity.Email != "" {
+			t.Errorf("expected empty email, got %q", report.Identity.Email)
+		}
+	})
+
+	t.Run("empty identity omitted as nil", func(t *testing.T) {
+		runner := createMockAppServerRunner(func(reqMethod string, reqID int64, params json.RawMessage) (any, *mockRPCError) {
+			switch reqMethod {
+			case "initialize":
+				return map[string]any{"userAgent": "dipstick/test"}, nil
+			case "account/rateLimits/read":
+				return map[string]any{"rateLimits": map[string]any{"limitId": "codex"}}, nil
+			case "account/usage/read":
+				return map[string]any{"summary": map[string]any{"lifetimeTokens": 100}}, nil
+			case "account/read":
+				return map[string]any{
+					"account": map[string]any{
+						"type":     "chatgpt",
+						"email":    "",
+						"planType": "",
+					},
+				}, nil
+			default:
+				return nil, &mockRPCError{Code: -32601, Message: "not found"}
+			}
+		})
+
+		adapter := codex.New(codex.WithAppServerRunner(runner))
+		src := adapter.Sources()[0]
+
+		report, err := src.Fetch(context.Background())
+		if err != nil {
+			t.Fatalf("Fetch failed: %v", err)
+		}
+		if report.Identity != nil {
+			t.Errorf("expected nil Identity when all identity fields are empty, got %+v", report.Identity)
+		}
+	})
 }
 
 func TestLocalStateSource_SQLiteTokenAccounting(t *testing.T) {
