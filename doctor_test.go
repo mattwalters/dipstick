@@ -455,6 +455,36 @@ func TestDoctor_CompatVerdicts(t *testing.T) {
 	}
 }
 
+func TestDoctor_CustomAdapterCompat(t *testing.T) {
+	customAdp := &doctorFakeAdapter{
+		id: dipstick.ProviderClaude,
+		detection: dipstick.Detection{
+			Installed:  true,
+			Version:    "3.0.0",
+			BinaryPath: "/bin/claude",
+		},
+		compat: dipstick.Compat{
+			VerifiedRange: ">=3.0.0 <4.0.0",
+			LastCheck:     "2026-08-29",
+		},
+	}
+
+	rep, err := dipstick.Doctor(context.Background(), dipstick.WithAdapter(customAdp), dipstick.WithProviders(dipstick.ProviderClaude))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rep.Providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(rep.Providers))
+	}
+	pr := rep.Providers[0]
+	if pr.CompatVerdict != dipstick.CompatVerified {
+		t.Errorf("expected custom adapter compat range to be respected (verified), got %s", pr.CompatVerdict)
+	}
+	if pr.CompatRange != ">=3.0.0 <4.0.0" {
+		t.Errorf("expected compat range '>=3.0.0 <4.0.0', got %q", pr.CompatRange)
+	}
+}
+
 func TestDoctor_SourcePolicySkipping(t *testing.T) {
 	tier1Source := &doctorFakeSource{
 		id:        dipstick.SourceOAuthAPI,

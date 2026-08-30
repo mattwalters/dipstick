@@ -236,7 +236,7 @@ func diagnoseProvider(ctx context.Context, pID ProviderID, adp Adapter, cfg *con
 	}
 
 	var compatRange string
-	if adp != nil {
+	if adp != nil && adp.Compat().VerifiedRange != "" {
 		compatRange = adp.Compat().VerifiedRange
 	} else if createAdp, ok := defaultAdapterRegistry[pID]; ok {
 		compatRange = createAdp().Compat().VerifiedRange
